@@ -73,9 +73,9 @@ class Report:
 
 
 def report(panel: Panel, features=None, offset=None, *, horizon=None,
-           scorer=None, match: str | None = None, repeats: int = 5,
+           scorer=None, match: str | None = None, repeats: int = 4,
            replicates: int = 50, only=None, skip=(), n_pairs: int = 20000,
-           seed: int | None = 0,
+           random: bool = False, seed: int | None = None,
            n_jobs: int | None = None) -> Report:
     """Run every check the panel supports and return them together.
 
@@ -89,17 +89,19 @@ def report(panel: Panel, features=None, offset=None, *, horizon=None,
         chronological control and the clock baseline are skipped.
     horizon : with one, the event checks forecast ("event within this
         long after the row"); without one, they use each row's flag.
-    repeats : how many times the audits and the column ranking are
-        repeated, each holding out a different fixed fifth of the units.
-        The default, 5, tests every unit once. Fewer is faster.
+    repeats : one number, N. Units fall into N + 1 fixed groups and the
+        audits and the column ranking run N times, each holding out a
+        different group: 1 holds out a half, 2 a third each, 4 (the
+        default) a fifth each.
     replicates : how many unit splits the event checks average over.
-    seed : 0 by default, so the same call gives the same numbers every
-        time. None picks a fresh seed each run; the one used is recorded
-        in the report.
+    random : False by default, so the same call gives the same numbers
+        every time. True draws held-out units and pairs at random,
+        differently on each run; the seed used is recorded in the
+        report and can be passed back as ``seed`` to repeat that run.
     only, skip : names from ('audit', 'columns', 'overlap',
         'chronological', 'clock') to restrict what runs.
     """
-    seed = pick_seed(seed)
+    seed = pick_seed(seed, random)
     parts = [p for p in (only or PARTS) if p not in skip]
     unknown = [p for p in list(parts) + list(skip) if p not in PARTS]
     if unknown:
@@ -118,8 +120,8 @@ def report(panel: Panel, features=None, offset=None, *, horizon=None,
         "n_units": int(panel.df[panel.unit].nunique()), "features": flat,
         "offset": [str(offset[0]), str(offset[1])], "offset_chosen": chosen,
         "horizon": None if horizon is None else str(horizon),
-        "repeats": repeats, "replicates": replicates, "seed": seed})
-    common = dict(seed=seed, n_jobs=n_jobs)
+        "repeats": repeats, "replicates": replicates, "random": random, "seed": seed})
+    common = dict(seed=seed, random=random, n_jobs=n_jobs)
     event = dict(model=sc, horizon=horizon, replicates=replicates, **common)
     steps = {
         "audit": lambda: audit(panel, features, offset, scorer=sc,

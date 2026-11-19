@@ -116,6 +116,8 @@ class Frame:
     cohort: np.ndarray | None  # per-unit code of the match column
     y: np.ndarray | None       # per-row event flag
     n_units_all: int
+    repeats: int = 4          # set by the caller; fixes the unit groups
+    random: bool = False      # held-out units drawn at random instead
 
     @property
     def n_units(self) -> int:

@@ -63,7 +63,8 @@ def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
     """The pairs and unit split of seed ``k``; deterministic in
     (seed, k), so audit() and rank_columns() draw the same pairs."""
     rng = np.random.default_rng(seed + k)
-    train = P.split_units(frame, k)
+    train = P.split_units(frame, k, frame.repeats,
+                          rng if frame.random else None)
     if kind == "identity":
         ra, rb, y, tr = P.identity_pairs(frame, lo, hi, n_pairs,
                                          max_per_unit, rng, train, mode)
@@ -86,12 +87,15 @@ def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
                 np.split(inv, len(roles_all)), int(len(codes)))
 
 
-def pick_seed(seed: int | None) -> int:
-    """The seed to use: the one given, or a fresh one when None. The
-    value is recorded in every result so a run can be repeated."""
-    if seed is None:
+def pick_seed(seed: int | None, random: bool = False) -> int:
+    """The seed to use: the one given; otherwise 0, or a fresh one when
+    ``random``. The value is recorded in every result so a run can be
+    repeated by passing it back."""
+    if seed is not None:
+        return int(seed)
+    if random:
         return int(np.random.SeedSequence().entropy % 2 ** 31)
-    return int(seed)
+    return 0
 
 
 def _one_seed(frame: Frame, kind: str, mode: str, k: int, seed: int,
@@ -193,8 +197,9 @@ def _feature_sets(features) -> dict:
 def audit(panel: Panel, features, offset, *, scorer=None,
           which=("identity", "timing"), impostors="random",
           match: str | None = None, n_pairs: int = 20000,
-          max_pairs_per_unit: int = 20, repeats: int = 5,
-          bootstrap: int = 2000, seed: int | None = 0,
+          max_pairs_per_unit: int = 20, repeats: int = 4,
+          bootstrap: int = 2000, random: bool = False,
+          seed: int | None = None,
           n_jobs: int | None = None) -> AuditResult:
     """Audit a panel for identity and timing signal.
 
@@ -215,15 +220,17 @@ def audit(panel: Panel, features, offset, *, scorer=None,
         its value (a declared cohort, such as model or vessel type).
     n_pairs, max_pairs_per_unit : how many pairs to draw, and how many
         one unit may contribute.
-    repeats : how many times to repeat. Units are assigned once to five fixed folds (by a
-        checksum of the unit identifier); repeat k holds out fold k and
-        draws its own pairs, so five repeats test every unit once.
-    seed : starts the pair sampling. With the default, results are the
-        same on every run for a fixed scorer. None picks a fresh seed
-        each run and records it in the result.
-    bootstrap : bootstrap replicates per seed.
-    n_jobs : parallel workers over (audit, seed); every core by default,
-        or the WHOWHEN_JOBS environment variable.
+    repeats : how many times to repeat. Units fall into repeats + 1
+        fixed groups (by a checksum of the unit identifier) and each
+        repeat holds out a different group and draws its own pairs: 1
+        holds out a half, 2 a third each, 4 a fifth each. More repeats
+        test more of the units and leave more to train on.
+    random : False by default: the held-out groups are fixed and the
+        same call gives the same numbers on every run. True draws the
+        held-out units and the pairs at random instead, differently on
+        each run.
+    seed : leave unset. A random run records the seed it used in the
+        result; pass that value here to repeat that exact run.
     """
     sets = _feature_sets(features)
     which = (which,) if isinstance(which, str) else tuple(which)
@@ -234,10 +241,11 @@ def audit(panel: Panel, features, offset, *, scorer=None,
     lo, hi = panel.offset(offset[0]), panel.offset(offset[1])
     if not 0 < lo <= hi:
         raise ValueError("offset needs 0 < min <= max")
-    seed = pick_seed(seed)
+    seed = pick_seed(seed, random)
     sc = resolve(scorer)
     columns = list(dict.fromkeys(c for v in sets.values() for c in v))
     frame = panel.frame(columns, match=match)
+    frame.repeats, frame.random = repeats, random
     if frame.n_units < 10:
         raise ValueError(f"only {frame.n_units} units without an event; "
                          f"the audits need many units")
@@ -256,7 +264,7 @@ def audit(panel: Panel, features, offset, *, scorer=None,
             "n_units_without_event": frame.n_units,
             "n_rows_audited": int(len(frame.unit)),
             "offset": [str(offset[0]), str(offset[1])],
-            "repeats": repeats, "bootstrap": bootstrap, "seed": seed,
+            "repeats": repeats, "bootstrap": bootstrap, "seed": seed, "random": random,
             "match": match, "feature_sets": sets, "workers": workers}
     return AuditResult(scorer=sc.describe(), info=info,
                        **{kind: _table(runs, kind) for kind in which})

@@ -43,7 +43,8 @@ optional:
 | plus `horizon="12h"` | the event checks run as a forecast: "does the event come within 12 hours of this row?" |
 | `features=[...]` | default: every numeric column |
 | `offset=(6, 24)` | how far apart the two rows of a pair are; default: chosen from the data and stated in the report |
-| `repeats=5` | how many times the audits repeat, each holding out a different fifth of the units; fewer is faster |
+| `repeats=4` | how many times the audits repeat, each holding out a different fixed group of units; fewer is faster |
+| `random=True` | draw held-out units at random instead of the fixed groups |
 | `only=`, `skip=` | pick parts |
 
 Each part is also a function of its own, described below. For example:
@@ -212,14 +213,23 @@ whowhen demo
 
 ## Repeatable results
 
-The same call on the same table gives the same numbers every time, for
-a fixed scorer. Units are assigned once to five fixed folds by a
-checksum of the unit identifier, with no seed involved; each repeat
-holds out one fold, so five repeats test every unit exactly once. The
-pairs within a repeat are sampled from a fixed starting point
-(`seed=0`); change `seed` to see a different sample, or pass
-`seed=None` for a fresh one each run. The seed used is recorded in the
-result.
+By default the same call on the same table gives the same numbers every
+time, for a fixed scorer.
+
+`repeats=N` is one number. Units fall into N + 1 fixed groups, by a
+checksum of the unit identifier, and the audits run N times, each
+holding out a different group:
+
+| `repeats` | Groups | Each repeat tests |
+|---|---|---|
+| 1 | 2 | one half of the units |
+| 2 | 3 | one third |
+| 3 | 4 | one quarter |
+| 4 (default) | 5 | one fifth |
+
+`random=True` draws the held-out units and the pairs at random instead,
+differently on each run. The seed that run used is recorded in the
+result; pass it back as `seed=` to repeat that exact run.
 
 ## Parallelism
 

@@ -54,7 +54,7 @@ def test_pairs_respect_unit_offset_and_split(panel):
     rows, y = pairs.timing_pairs(f, lo, hi, 500, 2, rng)
     early, late = rows[y == 0], rows[y == 1]
     assert len(early) and len(late)
-    train = pairs.split_units(f, 0)
+    train = pairs.split_units(f, 0, 4)
     ra, rb, lab, tr = pairs.identity_pairs(f, lo, hi, 800, 2, rng, train)
     gap = f.time[rb] - f.time[ra]
     assert ((gap >= lo) & (gap <= hi)).all()
@@ -155,13 +155,14 @@ def test_nearest_impostors_separate_type_from_individual(fast_scorer):
 
 def test_folds_are_fixed_and_cover_every_unit(panel):
     f = panel.frame(demo.SIG)
-    held = [~pairs.split_units(f, k) for k in range(pairs.FOLDS)]
-    assert (np.sum(held, axis=0) == 1).all()
-    assert 0.1 < held[0].mean() < 0.3
+    for n, share in ((1, 1 / 2), (2, 1 / 3), (4, 1 / 5)):
+        held = [~pairs.split_units(f, k, n) for k in range(n)]
+        assert (np.sum(held, axis=0) <= 1).all()       # never held out twice
+        assert all(abs(h.mean() - share) < 0.08 for h in held)
     shuffled = ww.Panel(panel.df.sample(frac=1, random_state=1), "unit",
                         "time").frame(demo.SIG)
-    a = dict(zip(f.unit_labels, pairs.unit_folds(f)))
-    b = dict(zip(shuffled.unit_labels, pairs.unit_folds(shuffled)))
+    a = dict(zip(f.unit_labels, pairs.unit_groups(f, 5)))
+    b = dict(zip(shuffled.unit_labels, pairs.unit_groups(shuffled, 5)))
     assert a == b
 
 

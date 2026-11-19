@@ -198,7 +198,7 @@ class OverlapResult:
 def overlap_check(panel: Panel, features, *, model=None,
                   replicates: int = 200, test_frac: float = 0.2,
                   time_split: str | None = None, embargo=None,
-                  horizon=None, seed: int | None = 0,
+                  horizon=None, random: bool = False, seed: int | None = None,
                   n_jobs: int | None = None) -> OverlapResult:
     """Measure how much sharing units between training and test inflates AUC.
 
@@ -246,7 +246,7 @@ def overlap_check(panel: Panel, features, *, model=None,
     emb = panel.offset(embargo) if embargo is not None else 0.0
     if emb < 0:
         raise ValueError("embargo must be non-negative")
-    seed = pick_seed(seed)
+    seed = pick_seed(seed, random)
     sc = resolve(model)
     frame = panel.frame(features, keep_event_units=True)
     if frame.n_units < 10:

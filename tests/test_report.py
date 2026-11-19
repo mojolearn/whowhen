@@ -78,10 +78,14 @@ def test_report_without_event_says_what_it_skipped(fast_scorer):
     assert "no event column" in repr(r)
 
 
-def test_seed_none_is_recorded(fast_scorer):
+def test_random_run_records_its_seed_and_can_be_repeated(fast_scorer):
     from whowhen import demo
     p = ww.Panel(demo.synthesize(n_units=120, n_days=50), "unit", "time")
     r = ww.audit(p, demo.SIG, offset=("10D", "30D"), which="timing",
-                 n_pairs=300, repeats=1, bootstrap=20, seed=None, n_jobs=1,
+                 n_pairs=300, repeats=1, bootstrap=20, random=True, n_jobs=1,
                  scorer=fast_scorer)
-    assert isinstance(r.info["seed"], int)
+    assert isinstance(r.info["seed"], int) and r.info["random"]
+    again = ww.audit(p, demo.SIG, offset=("10D", "30D"), which="timing",
+                     n_pairs=300, repeats=1, bootstrap=20, random=True,
+                     seed=r.info["seed"], n_jobs=1, scorer=fast_scorer)
+    assert again.timing.equals(r.timing)

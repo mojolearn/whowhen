@@ -22,7 +22,8 @@ def _fit_auc(frame: Frame, d: Draw, cols: tuple, scorer: Scorer, seed: int,
 def rank_columns(panel: Panel, columns, offset, *, scorer=None,
                  which=("identity", "timing"), match: str | None = None,
                  n_pairs: int = 20000, max_pairs_per_unit: int = 20,
-                 repeats: int = 3, seed: int | None = 0,
+                 repeats: int = 4, random: bool = False,
+                 seed: int | None = None,
                  n_jobs: int | None = None) -> dict[str, pd.DataFrame]:
     """Rank columns by how much identity or timing signal each carries.
 
@@ -50,7 +51,7 @@ def rank_columns(panel: Panel, columns, offset, *, scorer=None,
     WHOWHEN_JOBS environment variable.
     """
     columns = list(dict.fromkeys(columns))
-    seed = pick_seed(seed)
+    seed = pick_seed(seed, random)
     if not columns:
         raise ValueError("rank_columns needs at least one column")
     which = (which,) if isinstance(which, str) else tuple(which)
@@ -62,6 +63,7 @@ def rank_columns(panel: Panel, columns, offset, *, scorer=None,
         raise ValueError("offset needs 0 < min <= max")
     sc = resolve(scorer)
     frame = panel.frame(columns, match=match)
+    frame.repeats, frame.random = repeats, random
     if frame.n_units < 10:
         raise ValueError(f"only {frame.n_units} units without an event; "
                          f"the audits need many units")
