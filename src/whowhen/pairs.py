@@ -14,6 +14,8 @@ All functions take and return row positions into a ``Frame``.
 """
 from __future__ import annotations
 
+import zlib
+
 import numpy as np
 
 from .panel import Frame
@@ -22,10 +24,27 @@ NEAREST_POOL = 256   # candidates examined per anchor for nearest impostors
 NEAREST_K = 5        # the impostor is drawn from this many nearest units
 
 
-def split_units(frame: Frame, rng: np.random.Generator,
-                train_frac: float = 0.8) -> np.ndarray:
-    """Boolean per unit: True = training side. Units never straddle."""
-    return rng.random(frame.n_units) < train_frac
+FOLDS = 5
+
+
+def unit_folds(frame: Frame) -> np.ndarray:
+    """A fixed fold, 0 to FOLDS - 1, for every unit.
+
+    The fold comes from a checksum of the unit's own identifier, so it
+    does not depend on a seed, on row order, or on which other units
+    are in the table, and it is unrelated to anything the identifier's
+    order might track (time of entry, site).
+    """
+    return np.fromiter((zlib.crc32(str(u).encode()) % FOLDS
+                        for u in frame.unit_labels), np.int64,
+                       len(frame.unit_labels))
+
+
+def split_units(frame: Frame, k: int) -> np.ndarray:
+    """Boolean per unit: True = training side. Repeat ``k`` holds out
+    fold ``k``, so five repeats test every unit exactly once. Units
+    never straddle the split."""
+    return unit_folds(frame) != k % FOLDS
 
 
 def _within_unit(frame: Frame, units: np.ndarray, lo: float, hi: float,

@@ -63,7 +63,7 @@ def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
     """The pairs and unit split of seed ``k``; deterministic in
     (seed, k), so audit() and rank_columns() draw the same pairs."""
     rng = np.random.default_rng(seed + k)
-    train = P.split_units(frame, rng)
+    train = P.split_units(frame, k)
     if kind == "identity":
         ra, rb, y, tr = P.identity_pairs(frame, lo, hi, n_pairs,
                                          max_per_unit, rng, train, mode)
@@ -207,8 +207,11 @@ def audit(panel: Panel, features, offset, *, scorer=None,
         its value (a declared cohort, such as model or vessel type).
     n_pairs, max_pairs_per_unit : how many pairs to draw, and how many
         one unit may contribute.
-    seeds : independent repeats, each with fresh pairs and a fresh
-        80/20 split of units.
+    seeds : repeats. Units are assigned once to five fixed folds (by a
+        checksum of the unit identifier); repeat k holds out fold k and
+        draws its own pairs, so five repeats test every unit once.
+    seed : starts the pair sampling. Results are the same on every run
+        for a fixed seed and scorer.
     bootstrap : bootstrap replicates per seed.
     n_jobs : parallel workers over (audit, seed); every core by default,
         or the WHOWHEN_JOBS environment variable.

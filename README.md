@@ -209,6 +209,15 @@ whowhen demo
 
 `whowhen audit --help` shows the declaration format.
 
+## Repeatable results
+
+The same call on the same table gives the same numbers every time, for
+a fixed scorer. Units are assigned once to five fixed folds by a
+checksum of the unit identifier, with no seed involved; each repeat
+holds out one fold, so five repeats test every unit exactly once. The
+pairs within a repeat are sampled from a fixed starting point
+(`seed=0`); change `seed` only if you want to see a different sample.
+
 ## Parallelism
 
 Repeats, audits, columns and replicates are independent and run across
