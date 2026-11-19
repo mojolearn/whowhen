@@ -28,7 +28,7 @@ from .audit import n_workers
 from .panel import Panel
 from .scorers import Scorer, fit_score, resolve
 
-TIME_SPLITS = (None, "calendar")
+TIME_SPLITS = (None, "calendar", "chronological")
 
 
 def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
@@ -54,8 +54,46 @@ def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
         cut = float(np.quantile(time, 1.0 - test_frac))
         early = time <= cut - embargo
         return tu & (time > cut), tu & early, ~tu & early
+    if time_split == "chronological":
+        # rows are sorted by (unit, time): the later half of each test
+        # unit's rows is tested, the earlier half may be trained on
+        n = len(unit)
+        starts = np.flatnonzero(np.r_[True, unit[1:] != unit[:-1]])
+        counts = np.diff(np.r_[starts, n])
+        pos = np.arange(n) - np.repeat(starts, counts)
+        late = pos >= np.repeat(counts, counts) / 2
+        return tu & late, tu & ~late, ~tu
     raise ValueError(f"time_split must be one of {TIME_SPLITS}; "
                      f"got {time_split!r}")
+
+
+def forecast_labels(unit: np.ndarray, time: np.ndarray, y: np.ndarray,
+                    horizon: float):
+    """(keep, label) for a fixed-horizon task.
+
+    A unit's event time is the time of its first flagged row. Rows at or
+    after it are dropped; a kept row is positive when the event comes
+    within ``horizon`` after it. Units with no event are all negative.
+    """
+    n_units = int(unit.max()) + 1 if len(unit) else 0
+    onset = np.full(n_units, np.inf)
+    ev = np.flatnonzero(y == 1)
+    np.minimum.at(onset, unit[ev], time[ev])
+    first = np.full(n_units, np.inf)
+    np.minimum.at(first, unit, time)
+    had = np.isfinite(onset)
+    if had.any() and (onset[had] <= first[had]).mean() > 0.5:
+        raise ValueError(
+            "most units with an event are flagged from their first row, so "
+            "the event column says whether a unit had the event, not when; "
+            "a horizon needs the flag to start on the row where the event "
+            "happens")
+    t_on = onset[unit]
+    keep = time < t_on
+    label = (keep & (t_on - time <= horizon)).astype(np.int8)
+    if not label[keep].any():
+        raise ValueError("no row falls within the horizon before an event")
+    return keep, label[keep]
 
 
 def matched_training(y: np.ndarray, leak: np.ndarray, base: np.ndarray,
@@ -160,7 +198,8 @@ class OverlapResult:
 def overlap_check(panel: Panel, features, *, model=None,
                   replicates: int = 200, test_frac: float = 0.2,
                   time_split: str | None = None, embargo=None,
-                  seed: int = 0, n_jobs: int | None = None) -> OverlapResult:
+                  horizon=None, seed: int = 0,
+                  n_jobs: int | None = None) -> OverlapResult:
     """Measure how much sharing units between training and test inflates AUC.
 
     Parameters
@@ -175,8 +214,16 @@ def overlap_check(panel: Panel, features, *, model=None,
     test_frac : fraction of units used as test units. With
         ``time_split="calendar"`` it is also the fraction of rows after
         the time cut.
-    time_split : None, or "calendar" to take test rows from after a cut
-        time and training rows from before it, in both arms.
+    horizon : None to use the event flag of each row as the label, or an
+        offset in the time column's scale to forecast instead: the label
+        becomes "the unit's event comes within this long after the row",
+        and rows at or after the event are dropped. The event column
+        must then flag the row where the event happens.
+    time_split : None; "calendar" to take test rows from after a cut
+        time and training rows from before it, in both arms; or
+        "chronological" to test the later half of each test unit's rows
+        and let the overlap arm train on the earlier half, which asks
+        whether a unit's own past helps predict its own future.
     embargo : with "calendar", training rows must be at or before
         ``cut - embargo``; an offset in the time column's scale (a string
         such as '30D' for datetimes).
@@ -204,11 +251,14 @@ def overlap_check(panel: Panel, features, *, model=None,
     if frame.n_units < 10:
         raise ValueError(f"only {frame.n_units} units; the overlap check "
                          f"needs many units")
-    y = frame.y
+    X, y, unit, time = frame.X, frame.y, frame.unit, frame.time
+    if horizon is not None:
+        keep, y = forecast_labels(unit, time, y, panel.offset(horizon))
+        X, unit, time = X[keep], unit[keep], time[keep]
     workers = n_workers(n_jobs, replicates)
     threads = max(1, (os.cpu_count() or 1) // workers)
     runs = Parallel(n_jobs=workers)(
-        delayed(_replicate)(frame.X, y, frame.unit, frame.time, b, seed,
+        delayed(_replicate)(X, y, unit, time, b, seed,
                             test_frac, time_split, emb, sc, threads)
         for b in range(replicates))
     runs = [r for r in runs if r is not None]
@@ -220,6 +270,7 @@ def overlap_check(panel: Panel, features, *, model=None,
     info = {"features": features, "n_units": frame.n_units,
             "n_rows": int(len(y)), "event_rate": float(y.mean()),
             "test_frac": test_frac, "time_split": time_split,
+            "horizon": None if horizon is None else str(horizon),
             "embargo": None if embargo is None else str(embargo),
             "replicates_requested": replicates, "seed": seed,
             "workers": workers}

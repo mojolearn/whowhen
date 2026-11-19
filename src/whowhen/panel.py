@@ -54,6 +54,19 @@ class Panel:
             return float(pd.Timedelta(value).value)
         return float(value)
 
+    def default_offset(self):
+        """A pair offset chosen from the data, for when none is given:
+        from the typical gap between a unit's consecutive rows up to half
+        the typical span of a unit."""
+        d = self.df
+        step = d[self.time].diff()[d[self.unit].eq(d[self.unit].shift())]
+        g = d.groupby(self.unit, sort=False)[self.time]
+        span = (g.max() - g.min()).median() / 2
+        lo = step.median()
+        if pd.isna(lo) or pd.isna(span):
+            raise ValueError("units have one row each; nothing to pair")
+        return lo, max(lo, span)
+
     def frame(self, columns: list[str], match: str | None = None,
               keep_event_units: bool = False) -> "Frame":
         """Plain arrays for the audits. Rows stay sorted by (unit, time)."""

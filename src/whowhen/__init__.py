@@ -2,7 +2,7 @@
 
     import whowhen as ww
     panel = ww.Panel(df, unit="patient_id", time="hour", event="sepsis")
-    print(ww.audit(panel, features=cols, offset=(6, 24)))
+    print(ww.report(panel))
 
 who   can a row be matched to the unit it came from?
 when  can two rows of one unit be put in time order?
@@ -12,12 +12,15 @@ Both are measured as the AUC of a classifier on pairs built so that
 mean.
 """
 from .audit import AuditResult, audit, compare
+from .clock import ClockResult, clock_baseline
 from .columns import rank_columns
 from .overlap import OverlapResult, overlap_check
 from .panel import Panel
+from .report import Report, report
 from .scorers import Scorer, resolve as resolve_scorer
 
 __version__ = "0.1.0"
-__all__ = ["Panel", "audit", "compare", "rank_columns", "overlap_check",
+__all__ = ["Panel", "report", "Report", "clock_baseline", "ClockResult",
+           "audit", "compare", "rank_columns", "overlap_check",
            "AuditResult", "OverlapResult", "Scorer",
            "resolve_scorer", "__version__"]

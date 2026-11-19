@@ -29,7 +29,25 @@ import whowhen as ww
 
 df = pd.read_parquet("stays.parquet")
 panel = ww.Panel(df, unit="patient_id", time="hour", event="sepsis")
+print(ww.report(panel))
+```
 
+`report` runs every check the table supports and lists the ones it
+could not run, with the reason. Everything beyond the panel is
+optional:
+
+| You give | What you get |
+|---|---|
+| unit and time columns | identity and timing audits, the individual-or-type test, the per-column ranking |
+| plus an event column | the overlap check, the chronological control, the clock baseline |
+| plus `horizon="12h"` | the event checks run as a forecast: "does the event come within 12 hours of this row?" |
+| `features=[...]` | default: every numeric column |
+| `offset=(6, 24)` | how far apart the two rows of a pair are; default: chosen from the data and stated in the report |
+| `effort="quick"`, `"standard"` or `"full"` | fewer or more repeats; `only=` and `skip=` pick parts |
+
+Each part is also a function of its own, described below. For example:
+
+```python
 cols = ["heart_rate", "lactate", "creatinine", "hours_since_admission"]
 result = ww.audit(
     panel,
@@ -141,6 +159,27 @@ the same number of training rows per class: once with the test units
 held out of training, once with other rows of those units swapped in.
 The gap between the two scores, with its range over replicates, is how
 much sharing units is worth on your task.
+
+With `horizon="12h"` the label becomes "the event comes within 12
+hours of this row" and rows at or after the event are dropped. The
+event column must then be flagged on the row where the event happens,
+not on every row of the unit.
+
+With `time_split="chronological"` the later half of each test unit's
+rows is tested and the shared-unit run trains on the earlier half: does
+a unit's own past help predict its own future?
+
+## How much does the clock alone predict?
+
+```python
+print(ww.clock_baseline(panel, features=cols, horizon="12h"))
+```
+
+Many event tasks can be scored well above chance from one number: how
+long the unit has been observed. This fits the same classifier on the
+clock alone, on your features alone, and on both, with units held out,
+and reports what the features add once the clock is known. Leave clock
+columns out of `features` for this comparison.
 
 ## The scorer
 
