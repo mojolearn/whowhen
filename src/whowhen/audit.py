@@ -1,0 +1,274 @@
+"""Run the audits and report."""
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field
+
+import numpy as np
+import pandas as pd
+from joblib import Parallel, delayed
+
+from . import pairs as P
+from ._stats import auc, bootstrap_auc
+from .panel import Frame, Panel
+from .scorers import Scorer, fit_score, resolve
+
+KINDS = ("identity", "timing", "placebo")
+
+
+def n_workers(n_jobs: int | None, n_tasks: int) -> int:
+    """Workers for ``n_tasks`` independent tasks: every core by default."""
+    if n_jobs is None:
+        n_jobs = int(os.environ.get("WHOWHEN_JOBS", 0)) or os.cpu_count() or 1
+    return max(1, min(n_jobs, n_tasks))
+
+
+@dataclass
+class Draw:
+    """One pair draw and one unit split for one (audit, seed).
+
+    Every feature set fitted on a Draw sees the same pairs and the same
+    held-out units, so differences between sets are not pair noise.
+    rows_a, rows_b : the two rows of each identity pair; for timing,
+        rows_a holds the single rows and rows_b is None.
+    roles : held-out rows' unit codes (0..n_test_units-1), one array per
+        unit role, for the cluster bootstrap.
+    """
+    kind: str
+    mode: str
+    k: int
+    rows_a: np.ndarray
+    rows_b: np.ndarray | None
+    y: np.ndarray
+    tr: np.ndarray
+    roles: list
+    n_test_units: int
+
+    def features(self, frame: Frame, cols: list[int]) -> np.ndarray:
+        if self.rows_b is not None:
+            return P.pair_features(frame, self.rows_a, self.rows_b, cols)
+        return frame.X[np.ix_(self.rows_a, cols)]
+
+    def fit(self, frame: Frame, cols: list[int], scorer: Scorer, seed: int,
+            threads: int) -> np.ndarray:
+        """Held-out scores of a fresh scorer fitted on ``cols``."""
+        X = self.features(frame, cols)
+        return fit_score(scorer, seed, threads, X[self.tr], self.y[self.tr],
+                         X[~self.tr])
+
+
+def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
+         hi: float, n_pairs: int, max_per_unit: int) -> Draw:
+    """The pairs and unit split of seed ``k``; deterministic in
+    (seed, k), so audit() and rank_columns() draw the same pairs."""
+    rng = np.random.default_rng(seed + k)
+    train = P.split_units(frame, rng)
+    if kind == "identity":
+        ra, rb, y, tr = P.identity_pairs(frame, lo, hi, n_pairs,
+                                         max_per_unit, rng, train, mode)
+        roles_all = [frame.unit[ra], frame.unit[rb]]
+    else:
+        ra, y = P.timing_pairs(frame, lo, hi, n_pairs, max_per_unit, rng,
+                               placebo=(kind == "placebo"))
+        rb = None
+        tr = train[frame.unit[ra]]
+        roles_all = [frame.unit[ra]]
+    te = ~tr
+    if tr.sum() < 20 or te.sum() < 20:
+        raise ValueError(
+            f"the {kind} audit drew {int(tr.sum())} training and "
+            f"{int(te.sum())} held-out rows; too few units have two rows "
+            f"this offset apart")
+    codes, inv = np.unique(np.concatenate([r[te] for r in roles_all]),
+                           return_inverse=True)
+    return Draw(kind, mode, k, ra, rb, y, tr,
+                np.split(inv, len(roles_all)), int(len(codes)))
+
+
+def _one_seed(frame: Frame, kind: str, mode: str, k: int, seed: int,
+              sets: dict, lo: float, hi: float, n_pairs: int,
+              max_per_unit: int, n_boot: int, scorer: Scorer,
+              threads: int) -> dict:
+    """One pair draw, one unit split, one fit per feature set."""
+    d = draw(frame, kind, mode, k, seed, lo, hi, n_pairs, max_per_unit)
+    brng = np.random.default_rng(seed + 7 + 1000 * k)
+    yte = d.y[~d.tr]
+    out = {"kind": kind, "impostors": mode, "k": k,
+           "n_train": int(d.tr.sum()), "n_test": int((~d.tr).sum()),
+           "n_test_units": d.n_test_units, "sets": {}}
+    for name, cols in sets.items():
+        s = d.fit(frame, cols, scorer, seed, threads)
+        out["sets"][name] = {
+            "auc": auc(yte, s),
+            "boot": bootstrap_auc(yte, s, d.roles, d.n_test_units, n_boot,
+                                  brng)}
+    return out
+
+
+@dataclass
+class AuditResult:
+    """What the audits found.
+
+    identity, timing, placebo : one row per feature set, with the mean
+        AUC over seeds, a 95 percent interval (unit-cluster bootstrap
+        pooled over seeds, so it reflects both which pairs were drawn
+        and which units were held out) and the range over seeds. None
+        for an audit that was not run.
+    scorer : the classifier that produced the numbers.
+    info : what was audited (unit counts, offset, pair counts, seeds).
+    """
+    scorer: dict
+    info: dict
+    identity: pd.DataFrame | None = None
+    timing: pd.DataFrame | None = None
+    placebo: pd.DataFrame | None = None
+    tables: dict = field(default_factory=dict, repr=False)
+
+    def to_dict(self) -> dict:
+        d = {"scorer": self.scorer, "info": self.info}
+        for kind in KINDS:
+            t = getattr(self, kind)
+            if t is not None:
+                d[kind] = t.to_dict(orient="records")
+        return d
+
+    def to_json(self, path=None, indent: int = 2) -> str:
+        s = json.dumps(self.to_dict(), indent=indent, default=str)
+        if path:
+            with open(path, "w") as f:
+                f.write(s + "\n")
+        return s
+
+    def __repr__(self) -> str:
+        lines = [f"scorer: {self.scorer['name']}"]
+        for kind in KINDS:
+            t = getattr(self, kind)
+            if t is not None:
+                lines += ["", f"{kind} (AUC; 0.5 = no signal)",
+                          t.round(3).to_string(index=False)]
+        return "\n".join(lines)
+
+
+def _table(runs: list[dict], kind: str) -> pd.DataFrame | None:
+    runs = [r for r in runs if r["kind"] == kind]
+    if not runs:
+        return None
+    rows = []
+    for mode in dict.fromkeys(r["impostors"] for r in runs):
+        sub = [r for r in runs if r["impostors"] == mode]
+        for name in sub[0]["sets"]:
+            aucs = [r["sets"][name]["auc"] for r in sub]
+            boot = np.concatenate([r["sets"][name]["boot"] for r in sub])
+            lo, hi = np.percentile(boot, [2.5, 97.5])
+            row = {"features": name}
+            if kind == "identity":
+                row["impostors"] = mode
+            row.update(auc=float(np.mean(aucs)), lo=float(lo), hi=float(hi),
+                       seed_min=float(np.min(aucs)),
+                       seed_max=float(np.max(aucs)),
+                       test_rows=int(np.mean([r["n_test"] for r in sub])))
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _feature_sets(features) -> dict:
+    if isinstance(features, dict):
+        sets = {str(k): list(v) for k, v in features.items()}
+    else:
+        sets = {"all": list(features)}
+    if not sets or any(not v for v in sets.values()):
+        raise ValueError("every feature set needs at least one column")
+    return sets
+
+
+def audit(panel: Panel, features, offset, *, scorer=None,
+          which=("identity", "timing"), impostors="random",
+          match: str | None = None, n_pairs: int = 20000,
+          max_pairs_per_unit: int = 20, seeds: int = 5,
+          bootstrap: int = 2000, seed: int = 0,
+          n_jobs: int | None = None) -> AuditResult:
+    """Audit a panel for identity and timing signal.
+
+    Parameters
+    ----------
+    panel : a ``Panel``.
+    features : a list of columns, or a dict of named column lists to
+        audit side by side on the same pairs (for example with and
+        without a clock column, or before and after imputation).
+    offset : (min, max) gap between the two rows of a pair, in the time
+        column's scale; strings such as ("6h", "24h") for datetimes.
+    scorer : None for the default, 'mojolearn', 'lightgbm', an estimator
+        with fit and predict_proba, or a function from a seed to one.
+    which : any of 'identity', 'timing', 'placebo'.
+    impostors : 'random', 'nearest', or both in a tuple. See
+        ``whowhen.pairs.identity_pairs``.
+    match : optional column; an identity pair's two units then share
+        its value (a declared cohort, such as model or vessel type).
+    n_pairs, max_pairs_per_unit : how many pairs to draw, and how many
+        one unit may contribute.
+    seeds : independent repeats, each with fresh pairs and a fresh
+        80/20 split of units.
+    bootstrap : bootstrap replicates per seed.
+    n_jobs : parallel workers over (audit, seed); every core by default,
+        or the WHOWHEN_JOBS environment variable.
+    """
+    sets = _feature_sets(features)
+    which = (which,) if isinstance(which, str) else tuple(which)
+    bad = [w for w in which if w not in KINDS]
+    if bad:
+        raise ValueError(f"unknown audit {bad}; choose from {KINDS}")
+    modes = (impostors,) if isinstance(impostors, str) else tuple(impostors)
+    lo, hi = panel.offset(offset[0]), panel.offset(offset[1])
+    if not 0 < lo <= hi:
+        raise ValueError("offset needs 0 < min <= max")
+    sc = resolve(scorer)
+    columns = list(dict.fromkeys(c for v in sets.values() for c in v))
+    frame = panel.frame(columns, match=match)
+    if frame.n_units < 10:
+        raise ValueError(f"only {frame.n_units} units without an event; "
+                         f"the audits need many units")
+    col_sets = {name: frame.cols(v) for name, v in sets.items()}
+    tasks = [(kind, mode, k) for kind in which
+             for mode in (modes if kind == "identity" else ("random",))
+             for k in range(seeds)]
+    workers = n_workers(n_jobs, len(tasks))
+    threads = max(1, (os.cpu_count() or 1) // workers)
+    runs = Parallel(n_jobs=workers)(
+        delayed(_one_seed)(frame, kind, mode, k, seed, col_sets, lo, hi,
+                           n_pairs, max_pairs_per_unit, bootstrap, sc,
+                           threads)
+        for kind, mode, k in tasks)
+    info = {"n_units": frame.n_units_all,
+            "n_units_without_event": frame.n_units,
+            "n_rows_audited": int(len(frame.unit)),
+            "offset": [str(offset[0]), str(offset[1])],
+            "seeds": seeds, "bootstrap": bootstrap, "seed": seed,
+            "match": match, "feature_sets": sets, "workers": workers}
+    return AuditResult(scorer=sc.describe(), info=info,
+                       **{kind: _table(runs, kind) for kind in which})
+
+
+def compare(panel: Panel, variants: dict, offset, **kwargs) -> pd.DataFrame:
+    """Audit several named column sets on the same pairs, in one table.
+
+    This is how to compare choices made before modeling, such as raw
+    values against a carried-forward or imputed version: build each
+    version as its own columns and name them here.
+    """
+    r = audit(panel, variants, offset, **kwargs)
+    out = None
+    for kind in KINDS:
+        t = getattr(r, kind)
+        if t is None:
+            continue
+        keys = ["features"] + (["impostors"] if "impostors" in t else [])
+        t = t[keys + ["auc", "lo", "hi"]].rename(
+            columns={"auc": kind, "lo": f"{kind}_lo", "hi": f"{kind}_hi"})
+        if out is None:
+            out = t
+        else:
+            out = out.merge(t, on="features", how="outer", sort=False)
+    out = out.rename(columns={"features": "variant"})
+    out.attrs["scorer"] = r.scorer
+    return out

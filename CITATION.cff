@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "whowhen"
+type: software
+authors:
+  - given-names: Andrew
+    family-names: Hendel
+license: MIT
+repository-code: "https://github.com/mojolearn/whowhen"
+version: 0.1.0
+preferred-citation:
+  type: article
+  title: "Auditing Identity and Timing Signals in Operational Logs"
+  authors:
+    - given-names: Andrew
+      family-names: Hendel
+  year: 2026
+  notes: "Under review at the Journal of Data-centric Machine Learning Research (DMLR)"
