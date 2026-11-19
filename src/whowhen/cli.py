@@ -45,12 +45,12 @@ def main() -> None:  # pragma: no cover
     a.add_argument("--jobs", type=int, default=None)
     d = sub.add_parser("demo", help="synthetic panel with known answers")
     d.add_argument("--scorer", default=None)
-    d.add_argument("--seeds", type=int, default=3)
+    d.add_argument("--repeats", type=int, default=3)
     d.add_argument("--jobs", type=int, default=None)
     args = ap.parse_args()
     if args.cmd == "demo":
         from .demo import run_demo
-        raise SystemExit(0 if run_demo(args.scorer, args.seeds, args.jobs)
+        raise SystemExit(0 if run_demo(args.scorer, args.repeats, args.jobs)
                          else 1)
     cfg = json.loads(args.config.read_text())
     feats = cfg["features"]

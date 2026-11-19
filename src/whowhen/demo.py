@@ -107,10 +107,10 @@ def main() -> None:  # pragma: no cover
     ap.add_argument("--scorer", default=None,
                     help="mojolearn or lightgbm; default is the "
                          "platform default")
-    ap.add_argument("--seeds", type=int, default=3)
+    ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--jobs", type=int, default=None)
     a = ap.parse_args()
-    raise SystemExit(0 if run_demo(a.scorer, a.seeds, a.jobs) else 1)
+    raise SystemExit(0 if run_demo(a.scorer, a.repeats, a.jobs) else 1)
 
 
 if __name__ == "__main__":  # pragma: no cover
