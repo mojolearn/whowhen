@@ -82,14 +82,17 @@ def test_report_without_event(fast_scorer):
     assert "no event column" in repr(r)
 
 
-def test_report_without_time(fast_scorer):
-    df = event_table().drop(columns="time")
-    r = ww.report(df, unit="unit", event="event", repeats=2,
+def test_report_on_chosen_columns(fast_scorer):
+    df = event_table().drop(columns="event")
+    r = ww.report(df, unit="unit", time="time", features=["level"],
+                  repeats=1, n_pairs=600, _scorer=fast_scorer)
+    assert r.info["features"] == ["level"]
+    assert list(r.columns["identity"]["column"]) == ["level"]
+    r = ww.report(df, unit="unit", time="time", repeats=1, n_pairs=600,
+                  features={"a": ["level"], "b": ["level", "noise"]},
                   _scorer=fast_scorer)
-    assert r.overlap is not None
-    assert set(r.skipped) == {"audit", "columns", "chronological", "clock"}
-    with pytest.raises(ValueError, match="nothing to check"):
-        ww.report(df.drop(columns="event"), unit="unit")
+    assert set(r.audit.timing["features"]) == {"a", "b"}
+    assert r.info["features"] == ["level", "noise"]
 
 
 def test_random_run_records_its_seed(fast_scorer):

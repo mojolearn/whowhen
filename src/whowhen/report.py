@@ -74,8 +74,9 @@ class Report:
         return "\n".join(out)
 
 
-def report(df: pd.DataFrame, unit: str, time: str | None = None,
-           event: str | None = None, *, horizon=None, repeats: int = 4,
+def report(df: pd.DataFrame, unit: str, time: str,
+           event: str | None = None, *, features=None, horizon=None,
+           repeats: int = 4,
            random: bool = False, n_pairs: int = 20000,
            _scorer=None) -> Report:
     """Run every check the table supports and return them together.
@@ -84,11 +85,15 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
     ----------
     df : one row per observation.
     unit : the column naming the unit (patient, machine, loan, vessel).
-    time : the column giving when the row was observed. Without it only
-        the overlap check can run.
+    time : the column giving when the row was observed.
     event : optional column, nonzero where the event happens. Without
         it the overlap check, the chronological control and the clock
         baseline are left out.
+    features : optional. The columns to check: a list, or a dict of
+        named lists to audit side by side on the same pairs (for
+        example {"raw": [...], "filled": [...]}, or with and without a
+        clock column). Default: every numeric column other than unit,
+        time and event.
     horizon : optional. With it the event checks forecast: "does the
         event come within this long after the row?", in the time
         column's scale (a string such as '12h' for datetimes). The
@@ -102,58 +107,49 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
     n_pairs : the most row pairs each audit run is trained and tested
         on. Smaller tables use as many as they have.
 
-    Every numeric column other than these is audited. The gap between
-    the two rows of a pair is chosen from the data and stated in the
+    The gap between the two rows of a pair is chosen from the data and stated in the
     report. A check that cannot run is listed under "not run" with the
     reason.
     """
-    if time is None and event is None:
-        raise ValueError("give a time column, an event column, or both; "
-                         "with only a unit column there is nothing to check")
-    no_time = time is None
-    if no_time:
-        time = "__row__"
-        df = df.assign(**{time: df.groupby(unit, sort=False).cumcount()})
     panel = Panel(df, unit=unit, time=time, event=event)
-    features = [c for c in panel.df.columns if c not in (unit, time, event)
-                and pd.api.types.is_numeric_dtype(panel.df[c])]
-    if not features:
-        raise ValueError("the table has no numeric columns to audit")
+    if features is None:
+        features = [c for c in panel.df.columns
+                    if c not in (unit, time, event)
+                    and pd.api.types.is_numeric_dtype(panel.df[c])]
+    flat = (list(dict.fromkeys(c for v in features.values() for c in v))
+            if isinstance(features, dict) else list(features))
+    if not flat:
+        raise ValueError("there are no columns to check")
     seed = pick_seed(None, random)
     sc = resolve(_scorer)
     rep = Report(scorer=sc.describe(), info={
-        "n_units": int(panel.df[unit].nunique()), "features": features,
+        "n_units": int(panel.df[unit].nunique()), "features": flat,
         "offset": None, "horizon": None if horizon is None else str(horizon),
         "repeats": repeats, "random": random, "seed": seed})
     common = dict(seed=seed, random=random, repeats=repeats)
     event_kw = dict(model=sc, horizon=horizon, **common)
     offset = None
-    if not no_time:
-        try:
-            offset = panel.default_offset()
-            rep.info["offset"] = [str(offset[0]), str(offset[1])]
-        except ValueError as e:
-            no_pairs = str(e)
+    try:
+        offset = panel.default_offset()
+        rep.info["offset"] = [str(offset[0]), str(offset[1])]
+    except ValueError as e:
+        no_pairs = str(e)
     steps = {
         "audit": lambda: audit(panel, features, offset, scorer=sc,
                                n_pairs=n_pairs,
                                impostors=("random", "nearest"), **common),
-        "columns": lambda: rank_columns(panel, features, offset, scorer=sc,
+        "columns": lambda: rank_columns(panel, flat, offset, scorer=sc,
                                         n_pairs=n_pairs, **common),
-        "overlap": lambda: overlap_check(panel, features, **event_kw),
+        "overlap": lambda: overlap_check(panel, flat, **event_kw),
         "chronological": lambda: overlap_check(
-            panel, features, time_split="chronological", **event_kw),
-        "clock": lambda: clock_baseline(panel, features, **event_kw),
+            panel, flat, time_split="chronological", **event_kw),
+        "clock": lambda: clock_baseline(panel, flat, **event_kw),
     }
     for part in PARTS:
-        if part != "overlap" and no_time:
-            rep.skipped[part] = "no time column was given"
-        elif part in ("audit", "columns") and offset is None:
+        if part in ("audit", "columns") and offset is None:
             rep.skipped[part] = no_pairs
         elif part in ("overlap", "chronological", "clock") and not event:
             rep.skipped[part] = "no event column was given"
-        elif horizon is not None and no_time:
-            rep.skipped[part] = "a horizon needs a time column"
         else:
             try:
                 setattr(rep, part, steps[part]())

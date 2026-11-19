@@ -26,15 +26,15 @@ df = pd.read_parquet("stays.parquet")
 print(ww.report(df, unit="patient_id", time="hour", event="sepsis"))
 ```
 
-That is the whole interface. Every numeric column in the table is
-checked.
+That is the whole interface.
 
 | Setting | Required | Default | What it is |
 |---|---|---|---|
 | `df` | yes | | the table, one row per observation |
 | `unit` | yes | | the column naming the unit |
-| `time` | no | none | the column giving when the row was observed |
+| `time` | yes | | the column giving when the row was observed |
 | `event` | no | none | a column that is nonzero where the event happens |
+| `features` | no | every numeric column | the columns to check: a list, or a dict of named lists to compare side by side |
 | `horizon` | no | none | for forecasting tasks: how far ahead the event is predicted, in the time column's scale (`12`, or `"12h"` for datetimes) |
 | `repeats` | no | 4 | how many times every check is run |
 | `random` | no | `False` | draw held-out units at random instead of the fixed groups |
@@ -47,10 +47,18 @@ What runs depends on what you give:
 | `unit` and `time` | the identity and timing audits, the individual-or-type test, the per-column ranking |
 | plus `event` | the overlap check, the chronological control, the clock baseline |
 | plus `horizon` | those three run as a forecast: "does the event come within this long after the row?" |
-| `unit` and `event`, no `time` | the overlap check only |
 
 A check that cannot run is listed at the end of the report with the
-reason. At least one of `time` and `event` is needed.
+reason.
+
+To compare choices made before modeling, such as raw values against a
+carried-forward or imputed version, put both versions in the table and
+name them:
+
+```python
+ww.report(df, unit="patient_id", time="hour",
+          features={"raw": raw_cols, "carried_forward": filled_cols})
+```
 
 To see the library work before pointing it at your own data, run it on
 a synthetic table where the right answers are known:

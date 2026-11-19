@@ -20,7 +20,7 @@ def main() -> None:  # pragma: no cover
     r = sub.add_parser("report", help="check a table")
     r.add_argument("table", type=Path, help="parquet or CSV")
     r.add_argument("--unit", required=True)
-    r.add_argument("--time", default=None)
+    r.add_argument("--time", required=True)
     r.add_argument("--event", default=None)
     r.add_argument("--horizon", default=None)
     r.add_argument("--repeats", type=int, default=4)
