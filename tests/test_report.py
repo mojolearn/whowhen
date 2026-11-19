@@ -39,7 +39,8 @@ def test_forecast_labels():
 def test_chronological_masks():
     unit = np.repeat(np.arange(50), 10)
     time = np.tile(np.arange(10.0), 50)
-    te, leak, base = overlap_masks(unit, time, np.random.default_rng(0),
+    rng = np.random.default_rng(0)
+    te, leak, base = overlap_masks(unit, time, rng, rng.random(50) < 0.2,
                                    time_split="chronological")
     assert te.any() and not (te & leak).any() and not (te & base).any()
     assert set(unit[te]) == set(unit[leak])
@@ -49,7 +50,7 @@ def test_chronological_masks():
 
 def test_clock_baseline_sees_the_clock(fast_scorer):
     r = ww.clock_baseline(event_panel(), ["level", "noise"], horizon=12,
-                          model=fast_scorer, replicates=6, n_jobs=2)
+                          model=fast_scorer, repeats=6, n_jobs=2)
     t = r.table.set_index("input")["auc"]
     assert t["clock"] > 0.65
     assert t["features + clock"] > t["clock"]
@@ -58,7 +59,7 @@ def test_clock_baseline_sees_the_clock(fast_scorer):
 
 def test_report_runs_everything_it_can(fast_scorer):
     r = ww.report(event_panel(), horizon=12, scorer=fast_scorer,
-                  repeats=2, replicates=20, n_pairs=1500, n_jobs=2)
+                  repeats=2, n_pairs=1500, n_jobs=2)
     assert r.info["features"] == ["level", "noise"]
     assert r.info["offset_chosen"]
     assert not r.skipped, r.skipped

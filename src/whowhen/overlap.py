@@ -8,7 +8,7 @@ training rows of each class:
   units (rows that are not themselves test rows).
 
 The two fits differ only in whether training shares units with the test
-rows. The gap in AUC (overlap minus disjoint), over many replicates with
+rows. The gap in AUC (overlap minus disjoint), over many repeats with
 fresh unit splits, is the result. A gap whose interval excludes zero
 means a model evaluated on a row-random split would look better than it
 will on new units.
@@ -25,6 +25,7 @@ from joblib import Parallel, delayed
 
 from ._stats import auc
 from .audit import n_workers, pick_seed
+from .pairs import unit_groups
 from .panel import Panel
 from .scorers import Scorer, fit_score, resolve
 
@@ -32,26 +33,25 @@ TIME_SPLITS = (None, "calendar", "chronological")
 
 
 def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
-                  test_frac: float = 0.2, time_split: str | None = None,
+                  test_units: np.ndarray, time_split: str | None = None,
                   embargo: float = 0.0):
-    """(test, leak, base) boolean row masks for one replicate.
+    """(test, leak, base) boolean row masks for one repeat.
 
-    A fraction ``test_frac`` of units are test units. Without a time
-    split, test rows are a random half of each test unit's rows and leak
-    rows are the other half. With ``time_split="calendar"``, the cut is
-    the ``1 - test_frac`` quantile of time over all rows: test rows are
-    test-unit rows after the cut, and leak and base rows are at or before
-    ``cut - embargo``. Base rows are rows of units that are not test
-    units. Leak and base never contain a test row; base never contains a
-    row of a test unit.
+    ``test_units`` flags the held-out units. Without a time split, test
+    rows are a random half of each test unit's rows and leak rows are
+    the other half. With ``time_split="calendar"``, the cut leaves the
+    same share of rows after it as the share of units held out: test
+    rows are test-unit rows after the cut, and leak and base rows are at
+    or before ``cut - embargo``. Base rows are rows of units that are
+    not test units. Leak and base never contain a test row; base never
+    contains a row of a test unit.
     """
-    n_units = int(unit.max()) + 1 if len(unit) else 0
-    tu = (rng.random(n_units) < test_frac)[unit]
+    tu = test_units[unit]
     if time_split is None:
         half = rng.random(len(unit)) < 0.5
         return tu & half, tu & ~half, ~tu
     if time_split == "calendar":
-        cut = float(np.quantile(time, 1.0 - test_frac))
+        cut = float(np.quantile(time, 1.0 - test_units.mean()))
         early = time <= cut - embargo
         return tu & (time > cut), tu & early, ~tu & early
     if time_split == "chronological":
@@ -127,13 +127,23 @@ def _two_classes(y: np.ndarray) -> bool:
     return len(y) > 0 and y.min() != y.max()
 
 
-def _replicate(X, y, unit, time, b: int, seed: int, test_frac: float,
+def held_out(groups: np.ndarray, b: int, random: bool,
+             rng: np.random.Generator) -> np.ndarray:
+    """Per unit: is it held out in repeat ``b``? Fixed group ``b``, or a
+    random draw of the same share."""
+    if random:
+        return rng.random(len(groups)) < 1.0 / (int(groups.max()) + 1)
+    return groups == b
+
+
+def _replicate(X, y, unit, time, b: int, seed: int, groups, random: bool,
                time_split, embargo: float, scorer: Scorer,
                threads: int) -> dict | None:
     """One unit split, one matched pair of fits. None if a class is absent."""
     rng = np.random.default_rng([seed, b])
-    te, leak, base = overlap_masks(unit, time, rng, test_frac, time_split,
-                                   embargo)
+    te, leak, base = overlap_masks(unit, time, rng,
+                                   held_out(groups, b, random, rng),
+                                   time_split, embargo)
     ov, dj, share = matched_training(y, leak, base, rng)
     tei = np.flatnonzero(te)
     if not (_two_classes(y[tei]) and _two_classes(y[dj])):
@@ -152,10 +162,10 @@ def _replicate(X, y, unit, time, b: int, seed: int, test_frac: float,
 class OverlapResult:
     """What the overlap check found.
 
-    gap : mean over replicates of overlap AUC minus disjoint AUC.
+    gap : mean over repeats of overlap AUC minus disjoint AUC.
     lo, hi : 2.5 and 97.5 percentiles of the per-replicate gap.
     auc_overlap, auc_disjoint : mean AUC of each arm.
-    replicates : replicates that produced a gap.
+    repeats : repeats that produced a gap.
     scorer : the classifier that produced the numbers.
     per_replicate : one row per replicate.
     info : what was checked (feature set, split, counts).
@@ -165,7 +175,7 @@ class OverlapResult:
     hi: float
     auc_overlap: float
     auc_disjoint: float
-    replicates: int
+    repeats: int
     scorer: dict
     per_replicate: pd.DataFrame
     info: dict
@@ -174,7 +184,7 @@ class OverlapResult:
         return {"gap": self.gap, "lo": self.lo, "hi": self.hi,
                 "auc_overlap": self.auc_overlap,
                 "auc_disjoint": self.auc_disjoint,
-                "replicates": self.replicates, "scorer": self.scorer,
+                "repeats": self.repeats, "scorer": self.scorer,
                 "info": self.info,
                 "per_replicate": self.per_replicate.to_dict(orient="records")}
 
@@ -187,7 +197,7 @@ class OverlapResult:
 
     def __repr__(self) -> str:
         split = self.info.get("time_split") or "random half of test-unit rows"
-        return (f"overlap check ({self.replicates} replicates, "
+        return (f"overlap check ({self.repeats} repeats, "
                 f"split: {split}, scorer: {self.scorer['name']})\n"
                 f"  AUC overlap  {self.auc_overlap:.3f}\n"
                 f"  AUC disjoint {self.auc_disjoint:.3f}\n"
@@ -196,7 +206,7 @@ class OverlapResult:
 
 
 def overlap_check(panel: Panel, features, *, model=None,
-                  replicates: int = 200, test_frac: float = 0.2,
+                  repeats: int = 4,
                   time_split: str | None = None, embargo=None,
                   horizon=None, random: bool = False, seed: int | None = None,
                   n_jobs: int | None = None) -> OverlapResult:
@@ -210,10 +220,12 @@ def overlap_check(panel: Panel, features, *, model=None,
     model : None for the library default, 'mojolearn', 'lightgbm', an
         estimator with fit and predict_proba, or a function from a seed
         to one.
-    replicates : independent unit splits; each gives one gap.
-    test_frac : fraction of units used as test units. With
-        ``time_split="calendar"`` it is also the fraction of rows after
-        the time cut.
+    repeats : one number, N. Units fall into N + 1 fixed groups and the
+        check runs N times, each holding out a different group as the
+        test units. More repeats give a steadier range but smaller test
+        sets.
+    random : False by default (same numbers every run). True draws the
+        test units at random instead.
     horizon : None to use the event flag of each row as the label, or an
         offset in the time column's scale to forecast instead: the label
         becomes "the unit's event comes within this long after the row",
@@ -227,7 +239,7 @@ def overlap_check(panel: Panel, features, *, model=None,
     embargo : with "calendar", training rows must be at or before
         ``cut - embargo``; an offset in the time column's scale (a string
         such as '30D' for datetimes).
-    n_jobs : parallel workers over replicates; every core by default, or
+    n_jobs : parallel workers over repeats; every core by default, or
         the WHOWHEN_JOBS environment variable.
     """
     if not panel.event:
@@ -238,8 +250,6 @@ def overlap_check(panel: Panel, features, *, model=None,
                          f"got {time_split!r}")
     if embargo is not None and time_split != "calendar":
         raise ValueError("embargo applies only with time_split='calendar'")
-    if not 0 < test_frac < 1:
-        raise ValueError("test_frac must be between 0 and 1")
     features = list(features)
     if not features:
         raise ValueError("the feature set needs at least one column")
@@ -256,12 +266,13 @@ def overlap_check(panel: Panel, features, *, model=None,
     if horizon is not None:
         keep, y = forecast_labels(unit, time, y, panel.offset(horizon))
         X, unit, time = X[keep], unit[keep], time[keep]
-    workers = n_workers(n_jobs, replicates)
+    groups = unit_groups(frame, repeats + 1)
+    workers = n_workers(n_jobs, repeats)
     threads = max(1, (os.cpu_count() or 1) // workers)
     runs = Parallel(n_jobs=workers)(
         delayed(_replicate)(X, y, unit, time, b, seed,
-                            test_frac, time_split, emb, sc, threads)
-        for b in range(replicates))
+                            groups, random, time_split, emb, sc, threads)
+        for b in range(repeats))
     runs = [r for r in runs if r is not None]
     if not runs:
         raise ValueError("no replicate had both classes in its test and "
@@ -270,14 +281,14 @@ def overlap_check(panel: Panel, features, *, model=None,
     lo, hi = np.percentile(per["gap"], [2.5, 97.5])
     info = {"features": features, "n_units": frame.n_units,
             "n_rows": int(len(y)), "event_rate": float(y.mean()),
-            "test_frac": test_frac, "time_split": time_split,
+            "random": random, "time_split": time_split,
             "horizon": None if horizon is None else str(horizon),
             "embargo": None if embargo is None else str(embargo),
-            "replicates_requested": replicates, "seed": seed,
+            "repeats_requested": repeats, "seed": seed,
             "workers": workers}
     return OverlapResult(gap=float(per["gap"].mean()), lo=float(lo),
                          hi=float(hi),
                          auc_overlap=float(per["auc_overlap"].mean()),
                          auc_disjoint=float(per["auc_disjoint"].mean()),
-                         replicates=len(per), scorer=sc.describe(),
+                         repeats=len(per), scorer=sc.describe(),
                          per_replicate=per, info=info)

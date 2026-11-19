@@ -45,7 +45,7 @@ optional:
 | `offset=(6, 24)` | how far apart the two rows of a pair are; default: chosen from the data and stated in the report |
 | `repeats=4` | how many times the audits repeat, each holding out a different fixed group of units; fewer is faster |
 | `random=True` | draw held-out units at random instead of the fixed groups |
-| `only=`, `skip=` | pick parts |
+| `skip=` | leave parts out |
 
 Each part is also a function of its own, described below. For example:
 
@@ -152,14 +152,14 @@ ww.compare(panel,
 ## Does unit overlap change my score?
 
 ```python
-r = ww.overlap_check(panel, features=cols, replicates=200)
+r = ww.overlap_check(panel, features=cols)
 print(r)
 ```
 
 This needs an event column. It scores the same test rows twice with
 the same number of training rows per class: once with the test units
 held out of training, once with other rows of those units swapped in.
-The gap between the two scores, with its range over replicates, is how
+The gap between the two scores, with its range over repeats, is how
 much sharing units is worth on your task.
 
 With `horizon="12h"` the label becomes "the event comes within 12
@@ -233,7 +233,7 @@ result; pass it back as `seed=` to repeat that exact run.
 
 ## Parallelism
 
-Repeats, audits, columns and replicates are independent and run across
+Repeats, audits, columns and repeats are independent and run across
 all cores. Set `n_jobs=` or the `WHOWHEN_JOBS` environment variable to
 use fewer.
 

@@ -20,15 +20,16 @@ from joblib import Parallel, delayed
 
 from ._stats import auc
 from .audit import n_workers, pick_seed
-from .overlap import forecast_labels
+from .overlap import forecast_labels, held_out
+from .pairs import unit_groups
 from .panel import Panel
 from .scorers import Scorer, fit_score, resolve
 
 
-def _replicate(sets: dict, y, unit, b: int, seed: int, test_frac: float,
+def _replicate(sets: dict, y, unit, b: int, seed: int, groups, random: bool,
                scorer: Scorer, threads: int) -> dict | None:
     rng = np.random.default_rng([seed, b])
-    te = (rng.random(int(unit.max()) + 1) < test_frac)[unit]
+    te = held_out(groups, b, random, rng)[unit]
     if y[te].min() == y[te].max() or y[~te].min() == y[~te].max():
         return None
     return {name: auc(y[te], fit_score(scorer, seed + b, threads, X[~te],
@@ -41,7 +42,7 @@ class ClockResult:
     """What the clock baseline found.
 
     table : one row per input, with the mean held-out AUC and the 2.5
-        and 97.5 percentiles over replicates.
+        and 97.5 percentiles over repeats.
     gain, gain_lo, gain_hi : AUC of features with the clock minus AUC of
         the clock alone, per replicate: what the features add once the
         clock is known.
@@ -50,18 +51,18 @@ class ClockResult:
     gain: float
     gain_lo: float
     gain_hi: float
-    replicates: int
+    repeats: int
     scorer: dict
     info: dict
 
     def to_dict(self) -> dict:
         return {"table": self.table.to_dict(orient="records"),
                 "gain": self.gain, "gain_lo": self.gain_lo,
-                "gain_hi": self.gain_hi, "replicates": self.replicates,
+                "gain_hi": self.gain_hi, "repeats": self.repeats,
                 "scorer": self.scorer, "info": self.info}
 
     def __repr__(self) -> str:
-        return (f"clock baseline ({self.replicates} replicates, units held "
+        return (f"clock baseline ({self.repeats} repeats, units held "
                 f"out, scorer: {self.scorer['name']})\n"
                 f"{self.table.round(3).to_string(index=False)}\n"
                 f"  features add {self.gain:+.3f} "
@@ -69,7 +70,7 @@ class ClockResult:
 
 
 def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
-                   replicates: int = 50, test_frac: float = 0.2,
+                   repeats: int = 4,
                    random: bool = False, seed: int | None = None,
                    n_jobs: int | None = None) -> ClockResult:
     """Score the event task from elapsed time alone, and beside the features.
@@ -101,11 +102,13 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
         counts = (~np.isnan(X)).sum(1, keepdims=True).astype(np.float32)
         sets = {"clock": clock, "clock + counts": np.hstack([clock, counts]),
                 "features": X, "features + clock": sets["features + clock"]}
-    workers = n_workers(n_jobs, replicates)
+    groups = unit_groups(frame, repeats + 1)
+    workers = n_workers(n_jobs, repeats)
     threads = max(1, (os.cpu_count() or 1) // workers)
     runs = Parallel(n_jobs=workers)(
-        delayed(_replicate)(sets, y, unit, b, seed, test_frac, sc, threads)
-        for b in range(replicates))
+        delayed(_replicate)(sets, y, unit, b, seed, groups, random, sc,
+                            threads)
+        for b in range(repeats))
     per = pd.DataFrame([r for r in runs if r is not None])
     if per.empty:
         raise ValueError("no replicate had both classes in its test and "
@@ -118,8 +121,8 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
     info = {"features": features, "n_units": frame.n_units,
             "n_rows": int(len(y)), "event_rate": float(y.mean()),
             "horizon": None if horizon is None else str(horizon),
-            "replicates_requested": replicates, "seed": seed}
+            "repeats_requested": repeats, "seed": seed}
     return ClockResult(table=table, gain=float(g.mean()),
                        gain_lo=float(np.percentile(g, 2.5)),
                        gain_hi=float(np.percentile(g, 97.5)),
-                       replicates=len(per), scorer=sc.describe(), info=info)
+                       repeats=len(per), scorer=sc.describe(), info=info)

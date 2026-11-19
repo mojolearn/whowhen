@@ -52,7 +52,9 @@ def synth(n_units=300, rows=40, seed=0, per_unit_labels=True):
 def test_shared_test_equal_counts_and_disjointness(split, embargo):
     f = synth(seed=1).frame(FEATS, keep_event_units=True)
     rng = np.random.default_rng(1)
-    te, leak, base = overlap_masks(f.unit, f.time, rng, 0.2, split, embargo)
+    te, leak, base = overlap_masks(f.unit, f.time, rng,
+                                   rng.random(f.n_units) < 0.2, split,
+                                   embargo)
     assert te.sum() > 0 and leak.sum() > 0 and base.sum() > 0
     assert not (te & leak).any() and not (te & base).any()
     ov, dj, _ = matched_training(f.y, leak, base, rng)
@@ -78,14 +80,14 @@ def test_needs_event_column():
         overlap_check(bare, FEATS, model=HistGradientBoostingClassifier())
 
 
-KW = dict(model=HistGradientBoostingClassifier(max_iter=40), replicates=20,
+KW = dict(model=HistGradientBoostingClassifier(max_iter=40), repeats=20,
           n_jobs=2)
 
 
 def test_memorisable_units_inflate_score():
     r = overlap_check(synth(seed=2), FEATS, **KW)
     print(r)
-    assert r.replicates == 20 and len(r.per_replicate) == 20
+    assert r.repeats == 20 and len(r.per_replicate) == 20
     assert r.scorer["name"] == "sklearn.HistGradientBoostingClassifier"
     assert r.lo > 0, r
     assert r.to_dict()["gap"] == r.gap
@@ -99,5 +101,5 @@ def test_independent_labels_no_inflation():
 
 def test_calendar_split_runs():
     r = overlap_check(synth(seed=4), FEATS, time_split="calendar",
-                      embargo="3D", **{**KW, "replicates": 4})
-    assert r.info["time_split"] == "calendar" and r.replicates == 4
+                      embargo="3D", **{**KW, "repeats": 4})
+    assert r.info["time_split"] == "calendar" and r.repeats == 4
