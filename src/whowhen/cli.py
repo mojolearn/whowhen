@@ -9,7 +9,7 @@ The declaration:
      "features": {"all": ["a", "b", "age"], "no_clock": ["a", "b"]},
      "offset": ["30D", "90D"],
      "which": ["identity", "timing"], "impostors": "random",
-     "match": null, "n_pairs": 20000, "seeds": 5, "scorer": null}
+     "match": null, "n_pairs": 20000, "repeats": 5, "scorer": null}
 
 Only unit, time, features and offset are required.
 """
@@ -62,7 +62,7 @@ def main() -> None:  # pragma: no cover
     df = _read(args.panel, list(dict.fromkeys(cols)))
     panel = Panel(df, **{k: cfg.get(k) for k in PANEL_KEYS})
     kw = {k: cfg[k] for k in ("which", "impostors", "match", "n_pairs",
-                              "max_pairs_per_unit", "seeds", "bootstrap",
+                              "max_pairs_per_unit", "repeats", "bootstrap",
                               "seed", "scorer") if k in cfg}
     result = audit(panel, feats, tuple(cfg["offset"]), n_jobs=args.jobs, **kw)
     print(result)

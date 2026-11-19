@@ -43,7 +43,8 @@ optional:
 | plus `horizon="12h"` | the event checks run as a forecast: "does the event come within 12 hours of this row?" |
 | `features=[...]` | default: every numeric column |
 | `offset=(6, 24)` | how far apart the two rows of a pair are; default: chosen from the data and stated in the report |
-| `effort="quick"`, `"standard"` or `"full"` | fewer or more repeats; `only=` and `skip=` pick parts |
+| `repeats=5` | how many times the audits repeat, each holding out a different fifth of the units; fewer is faster |
+| `only=`, `skip=` | pick parts |
 
 Each part is also a function of its own, described below. For example:
 
@@ -216,7 +217,9 @@ a fixed scorer. Units are assigned once to five fixed folds by a
 checksum of the unit identifier, with no seed involved; each repeat
 holds out one fold, so five repeats test every unit exactly once. The
 pairs within a repeat are sampled from a fixed starting point
-(`seed=0`); change `seed` only if you want to see a different sample.
+(`seed=0`); change `seed` to see a different sample, or pass
+`seed=None` for a fresh one each run. The seed used is recorded in the
+result.
 
 ## Parallelism
 

@@ -79,11 +79,11 @@ def verdicts(result: AuditResult) -> list[tuple]:
     return out
 
 
-def run_demo(scorer=None, seeds: int = 3, n_jobs: int | None = None,
+def run_demo(scorer=None, repeats: int = 3, n_jobs: int | None = None,
              quiet: bool = False) -> bool:
     panel = Panel(synthesize(), unit="unit", time="time")
     result = audit(panel, SETS, offset=("30D", "90D"), scorer=scorer,
-                   n_pairs=3000, max_pairs_per_unit=4, seeds=seeds,
+                   n_pairs=3000, max_pairs_per_unit=4, repeats=repeats,
                    bootstrap=500, seed=20260821, n_jobs=n_jobs)
     rows = verdicts(result)
     if not quiet:

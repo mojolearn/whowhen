@@ -86,6 +86,14 @@ def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
                 np.split(inv, len(roles_all)), int(len(codes)))
 
 
+def pick_seed(seed: int | None) -> int:
+    """The seed to use: the one given, or a fresh one when None. The
+    value is recorded in every result so a run can be repeated."""
+    if seed is None:
+        return int(np.random.SeedSequence().entropy % 2 ** 31)
+    return int(seed)
+
+
 def _one_seed(frame: Frame, kind: str, mode: str, k: int, seed: int,
               sets: dict, lo: float, hi: float, n_pairs: int,
               max_per_unit: int, n_boot: int, scorer: Scorer,
@@ -111,12 +119,12 @@ class AuditResult:
     """What the audits found.
 
     identity, timing, placebo : one row per feature set, with the mean
-        AUC over seeds, a 95 percent interval (unit-cluster bootstrap
-        pooled over seeds, so it reflects both which pairs were drawn
-        and which units were held out) and the range over seeds. None
+        AUC over repeats, a 95 percent interval (unit-cluster bootstrap
+        pooled over repeats, so it reflects both which pairs were drawn
+        and which units were held out) and the range over repeats. None
         for an audit that was not run.
     scorer : the classifier that produced the numbers.
-    info : what was audited (unit counts, offset, pair counts, seeds).
+    info : what was audited (unit counts, offset, pair counts, repeats).
     """
     scorer: dict
     info: dict
@@ -185,8 +193,8 @@ def _feature_sets(features) -> dict:
 def audit(panel: Panel, features, offset, *, scorer=None,
           which=("identity", "timing"), impostors="random",
           match: str | None = None, n_pairs: int = 20000,
-          max_pairs_per_unit: int = 20, seeds: int = 5,
-          bootstrap: int = 2000, seed: int = 0,
+          max_pairs_per_unit: int = 20, repeats: int = 5,
+          bootstrap: int = 2000, seed: int | None = 0,
           n_jobs: int | None = None) -> AuditResult:
     """Audit a panel for identity and timing signal.
 
@@ -207,11 +215,12 @@ def audit(panel: Panel, features, offset, *, scorer=None,
         its value (a declared cohort, such as model or vessel type).
     n_pairs, max_pairs_per_unit : how many pairs to draw, and how many
         one unit may contribute.
-    seeds : repeats. Units are assigned once to five fixed folds (by a
+    repeats : how many times to repeat. Units are assigned once to five fixed folds (by a
         checksum of the unit identifier); repeat k holds out fold k and
         draws its own pairs, so five repeats test every unit once.
-    seed : starts the pair sampling. Results are the same on every run
-        for a fixed seed and scorer.
+    seed : starts the pair sampling. With the default, results are the
+        same on every run for a fixed scorer. None picks a fresh seed
+        each run and records it in the result.
     bootstrap : bootstrap replicates per seed.
     n_jobs : parallel workers over (audit, seed); every core by default,
         or the WHOWHEN_JOBS environment variable.
@@ -225,6 +234,7 @@ def audit(panel: Panel, features, offset, *, scorer=None,
     lo, hi = panel.offset(offset[0]), panel.offset(offset[1])
     if not 0 < lo <= hi:
         raise ValueError("offset needs 0 < min <= max")
+    seed = pick_seed(seed)
     sc = resolve(scorer)
     columns = list(dict.fromkeys(c for v in sets.values() for c in v))
     frame = panel.frame(columns, match=match)
@@ -234,7 +244,7 @@ def audit(panel: Panel, features, offset, *, scorer=None,
     col_sets = {name: frame.cols(v) for name, v in sets.items()}
     tasks = [(kind, mode, k) for kind in which
              for mode in (modes if kind == "identity" else ("random",))
-             for k in range(seeds)]
+             for k in range(repeats)]
     workers = n_workers(n_jobs, len(tasks))
     threads = max(1, (os.cpu_count() or 1) // workers)
     runs = Parallel(n_jobs=workers)(
@@ -246,7 +256,7 @@ def audit(panel: Panel, features, offset, *, scorer=None,
             "n_units_without_event": frame.n_units,
             "n_rows_audited": int(len(frame.unit)),
             "offset": [str(offset[0]), str(offset[1])],
-            "seeds": seeds, "bootstrap": bootstrap, "seed": seed,
+            "repeats": repeats, "bootstrap": bootstrap, "seed": seed,
             "match": match, "feature_sets": sets, "workers": workers}
     return AuditResult(scorer=sc.describe(), info=info,
                        **{kind: _table(runs, kind) for kind in which})

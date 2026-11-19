@@ -19,7 +19,7 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from ._stats import auc
-from .audit import n_workers
+from .audit import n_workers, pick_seed
 from .overlap import forecast_labels
 from .panel import Panel
 from .scorers import Scorer, fit_score, resolve
@@ -70,7 +70,7 @@ class ClockResult:
 
 def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
                    replicates: int = 50, test_frac: float = 0.2,
-                   seed: int = 0, n_jobs: int | None = None) -> ClockResult:
+                   seed: int | None = 0, n_jobs: int | None = None) -> ClockResult:
     """Score the event task from elapsed time alone, and beside the features.
 
     Parameters are as in ``overlap_check``. The clock is the time since
@@ -81,6 +81,7 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
         raise ValueError("the clock baseline needs a panel with an event "
                          "column; pass event= to Panel")
     features = list(features)
+    seed = pick_seed(seed)
     sc = resolve(model)
     frame = panel.frame(features, keep_event_units=True)
     X, y, unit, time = frame.X, frame.y, frame.unit, frame.time

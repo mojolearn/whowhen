@@ -8,7 +8,7 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from ._stats import auc
-from .audit import KINDS, Draw, draw, n_workers
+from .audit import KINDS, Draw, draw, n_workers, pick_seed
 from .panel import Frame, Panel
 from .scorers import Scorer, resolve
 
@@ -22,7 +22,7 @@ def _fit_auc(frame: Frame, d: Draw, cols: tuple, scorer: Scorer, seed: int,
 def rank_columns(panel: Panel, columns, offset, *, scorer=None,
                  which=("identity", "timing"), match: str | None = None,
                  n_pairs: int = 20000, max_pairs_per_unit: int = 20,
-                 seeds: int = 3, seed: int = 0,
+                 repeats: int = 3, seed: int | None = 0,
                  n_jobs: int | None = None) -> dict[str, pd.DataFrame]:
     """Rank columns by how much identity or timing signal each carries.
 
@@ -35,9 +35,9 @@ def rank_columns(panel: Panel, columns, offset, *, scorer=None,
     sorted by ``alone`` descending:
 
     column : the column.
-    alone : AUC using that column only, mean over seeds.
+    alone : AUC using that column only, mean over repeats.
     drop : AUC with all columns minus AUC without that column, mean over
-        seeds. Near zero means the other columns cover what it carries.
+        repeats. Near zero means the other columns cover what it carries.
         With a single column, the set without it scores 0.5 (chance).
     all : AUC with all columns, the same on every row.
 
@@ -50,6 +50,7 @@ def rank_columns(panel: Panel, columns, offset, *, scorer=None,
     WHOWHEN_JOBS environment variable.
     """
     columns = list(dict.fromkeys(columns))
+    seed = pick_seed(seed)
     if not columns:
         raise ValueError("rank_columns needs at least one column")
     which = (which,) if isinstance(which, str) else tuple(which)
@@ -67,7 +68,7 @@ def rank_columns(panel: Panel, columns, offset, *, scorer=None,
     cores = os.cpu_count() or 1
 
     # Phase 1: one draw per (audit, seed), in parallel.
-    keys = [(kind, k) for kind in which for k in range(seeds)]
+    keys = [(kind, k) for kind in which for k in range(repeats)]
     workers = n_workers(n_jobs, len(keys))
     draws = dict(zip(keys, Parallel(n_jobs=workers)(
         delayed(draw)(frame, kind, "random", k, seed, lo, hi, n_pairs,
@@ -90,7 +91,7 @@ def rank_columns(panel: Panel, columns, offset, *, scorer=None,
 
     out = {}
     for kind in which:
-        ks = [(kind, k) for k in range(seeds)]
+        ks = [(kind, k) for k in range(repeats)]
         per_seed = lambda cols: np.array(
             [aucs[key, cols] if cols else 0.5 for key in ks])
         a_full = per_seed(full)

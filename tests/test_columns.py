@@ -7,7 +7,7 @@ from whowhen import demo
 from whowhen.audit import draw
 from whowhen.columns import rank_columns
 
-KW = dict(n_pairs=1500, max_pairs_per_unit=4, seeds=2, n_jobs=2)
+KW = dict(n_pairs=1500, max_pairs_per_unit=4, repeats=2, n_jobs=2)
 COLS = demo.CLOCKS + demo.SIG + demo.NOISE
 
 

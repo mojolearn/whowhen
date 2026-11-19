@@ -10,16 +10,13 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .audit import AuditResult, audit
+from .audit import AuditResult, audit, pick_seed
 from .clock import ClockResult, clock_baseline
 from .columns import rank_columns
 from .overlap import OverlapResult, overlap_check
 from .panel import Panel
 from .scorers import resolve
 
-# seeds for the audits, seeds for the column ranking, replicates for the
-# event checks
-EFFORT = {"quick": (2, 1, 20), "standard": (3, 2, 50), "full": (5, 3, 200)}
 PARTS = ("audit", "columns", "overlap", "chronological", "clock")
 
 
@@ -76,8 +73,9 @@ class Report:
 
 
 def report(panel: Panel, features=None, offset=None, *, horizon=None,
-           scorer=None, match: str | None = None, effort: str = "standard",
-           only=None, skip=(), n_pairs: int = 20000, seed: int = 0,
+           scorer=None, match: str | None = None, repeats: int = 5,
+           replicates: int = 50, only=None, skip=(), n_pairs: int = 20000,
+           seed: int | None = 0,
            n_jobs: int | None = None) -> Report:
     """Run every check the panel supports and return them together.
 
@@ -91,13 +89,17 @@ def report(panel: Panel, features=None, offset=None, *, horizon=None,
         chronological control and the clock baseline are skipped.
     horizon : with one, the event checks forecast ("event within this
         long after the row"); without one, they use each row's flag.
-    effort : 'quick', 'standard' or 'full'; more repeats cost more time.
+    repeats : how many times the audits and the column ranking are
+        repeated, each holding out a different fixed fifth of the units.
+        The default, 5, tests every unit once. Fewer is faster.
+    replicates : how many unit splits the event checks average over.
+    seed : 0 by default, so the same call gives the same numbers every
+        time. None picks a fresh seed each run; the one used is recorded
+        in the report.
     only, skip : names from ('audit', 'columns', 'overlap',
         'chronological', 'clock') to restrict what runs.
     """
-    if effort not in EFFORT:
-        raise ValueError(f"effort is one of {tuple(EFFORT)}")
-    seeds, col_seeds, reps = EFFORT[effort]
+    seed = pick_seed(seed)
     parts = [p for p in (only or PARTS) if p not in skip]
     unknown = [p for p in list(parts) + list(skip) if p not in PARTS]
     if unknown:
@@ -116,16 +118,16 @@ def report(panel: Panel, features=None, offset=None, *, horizon=None,
         "n_units": int(panel.df[panel.unit].nunique()), "features": flat,
         "offset": [str(offset[0]), str(offset[1])], "offset_chosen": chosen,
         "horizon": None if horizon is None else str(horizon),
-        "effort": effort})
+        "repeats": repeats, "replicates": replicates, "seed": seed})
     common = dict(seed=seed, n_jobs=n_jobs)
-    event = dict(model=sc, horizon=horizon, replicates=reps, **common)
+    event = dict(model=sc, horizon=horizon, replicates=replicates, **common)
     steps = {
         "audit": lambda: audit(panel, features, offset, scorer=sc,
-                               match=match, n_pairs=n_pairs, seeds=seeds,
+                               match=match, n_pairs=n_pairs, repeats=repeats,
                                impostors=("random", "nearest"), **common),
         "columns": lambda: rank_columns(panel, flat, offset, scorer=sc,
                                         match=match, n_pairs=n_pairs,
-                                        seeds=col_seeds, **common),
+                                        repeats=repeats, **common),
         "overlap": lambda: overlap_check(panel, flat, **event),
         "chronological": lambda: overlap_check(
             panel, flat, time_split="chronological", **event),

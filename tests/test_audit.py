@@ -8,7 +8,7 @@ from whowhen import demo, pairs
 from whowhen._stats import bootstrap_auc
 from whowhen.scorers import resolve
 
-KW = dict(n_pairs=2000, max_pairs_per_unit=4, seeds=2, bootstrap=200,
+KW = dict(n_pairs=2000, max_pairs_per_unit=4, repeats=2, bootstrap=200,
           n_jobs=2)
 
 
@@ -29,7 +29,7 @@ def test_each_audit_reads_only_its_own_signal(panel, fast_scorer):
 def test_default_scorer_is_recorded(panel, default_scorer_runs):
     r = ww.audit(panel, {"signature": demo.SIG, "noise": demo.NOISE},
                  offset=("30D", "90D"), which="identity", n_pairs=1500,
-                 max_pairs_per_unit=4, seeds=1, bootstrap=100, n_jobs=1)
+                 max_pairs_per_unit=4, repeats=1, bootstrap=100, n_jobs=1)
     assert r.scorer == resolve(None).describe()
     t = r.identity.set_index("features")
     assert t.loc["signature", "auc"] > 0.6
@@ -167,7 +167,7 @@ def test_folds_are_fixed_and_cover_every_unit(panel):
 
 def test_same_call_gives_the_same_numbers(panel, fast_scorer):
     kw = dict(offset=("30D", "90D"), which="identity", n_pairs=600,
-              max_pairs_per_unit=2, seeds=2, bootstrap=50, n_jobs=2,
+              max_pairs_per_unit=2, repeats=2, bootstrap=50, n_jobs=2,
               scorer=fast_scorer)
     a = ww.audit(panel, demo.SIG, **kw).identity
     b = ww.audit(panel, demo.SIG, **kw).identity

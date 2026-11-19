@@ -58,7 +58,7 @@ def test_clock_baseline_sees_the_clock(fast_scorer):
 
 def test_report_runs_everything_it_can(fast_scorer):
     r = ww.report(event_panel(), horizon=12, scorer=fast_scorer,
-                  effort="quick", n_pairs=1500, n_jobs=2)
+                  repeats=2, replicates=20, n_pairs=1500, n_jobs=2)
     assert r.info["features"] == ["level", "noise"]
     assert r.info["offset_chosen"]
     assert not r.skipped, r.skipped
@@ -71,8 +71,17 @@ def test_report_runs_everything_it_can(fast_scorer):
 def test_report_without_event_says_what_it_skipped(fast_scorer):
     from whowhen import demo
     p = ww.Panel(demo.synthesize(n_units=150, n_days=60), "unit", "time")
-    r = ww.report(p, scorer=fast_scorer, effort="quick", n_pairs=800,
+    r = ww.report(p, scorer=fast_scorer, repeats=2, n_pairs=800,
                   skip=("columns",), n_jobs=2)
     assert r.audit is not None and r.columns is None
     assert set(r.skipped) == {"overlap", "chronological", "clock"}
     assert "no event column" in repr(r)
+
+
+def test_seed_none_is_recorded(fast_scorer):
+    from whowhen import demo
+    p = ww.Panel(demo.synthesize(n_units=120, n_days=50), "unit", "time")
+    r = ww.audit(p, demo.SIG, offset=("10D", "30D"), which="timing",
+                 n_pairs=300, repeats=1, bootstrap=20, seed=None, n_jobs=1,
+                 scorer=fast_scorer)
+    assert isinstance(r.info["seed"], int)
