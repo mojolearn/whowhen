@@ -26,7 +26,7 @@ def test_each_audit_reads_only_its_own_signal(panel, fast_scorer):
     assert r.scorer["params"]["max_iter"] == 60
 
 
-def test_default_scorer_is_recorded(panel):
+def test_default_scorer_is_recorded(panel, default_scorer_runs):
     r = ww.audit(panel, {"signature": demo.SIG, "noise": demo.NOISE},
                  offset=("30D", "90D"), which="identity", n_pairs=1500,
                  max_pairs_per_unit=4, seeds=1, bootstrap=100, n_jobs=1)
