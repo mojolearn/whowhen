@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from sklearn.ensemble import HistGradientBoostingClassifier
 
@@ -37,3 +39,6 @@ def default_scorer_runs():
         tail = (p.stderr.strip().splitlines() or ["no output"])[-1]
         pytest.skip(f"default scorer cannot run here (exit "
                     f"{p.returncode}): {tail[:200]}")
+
+
+os.environ.setdefault("WHOWHEN_JOBS", "2")

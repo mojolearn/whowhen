@@ -75,8 +75,7 @@ class Report:
 def report(panel: Panel, features=None, offset=None, *, horizon=None,
            scorer=None, match: str | None = None, repeats: int = 4,
            skip=(), n_pairs: int = 20000,
-           random: bool = False,
-           n_jobs: int | None = None) -> Report:
+           random: bool = False) -> Report:
     """Run every check the panel supports and return them together.
 
     Only the panel is required. What is missing decides what runs:
@@ -120,7 +119,7 @@ def report(panel: Panel, features=None, offset=None, *, horizon=None,
         "offset": [str(offset[0]), str(offset[1])], "offset_chosen": chosen,
         "horizon": None if horizon is None else str(horizon),
         "repeats": repeats, "random": random, "seed": seed})
-    common = dict(seed=seed, random=random, n_jobs=n_jobs)
+    common = dict(seed=seed, random=random)
     event = dict(model=sc, horizon=horizon, repeats=repeats, **common)
     steps = {
         "audit": lambda: audit(panel, features, offset, scorer=sc,

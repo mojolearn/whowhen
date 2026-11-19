@@ -59,7 +59,7 @@ def test_clock_baseline_sees_the_clock(fast_scorer):
 
 def test_report_runs_everything_it_can(fast_scorer):
     r = ww.report(event_panel(), horizon=12, scorer=fast_scorer,
-                  repeats=2, n_pairs=1500, n_jobs=2)
+                  repeats=2, n_pairs=1500)
     assert r.info["features"] == ["level", "noise"]
     assert r.info["offset_chosen"]
     assert not r.skipped, r.skipped
@@ -73,7 +73,7 @@ def test_report_without_event_says_what_it_skipped(fast_scorer):
     from whowhen import demo
     p = ww.Panel(demo.synthesize(n_units=150, n_days=60), "unit", "time")
     r = ww.report(p, scorer=fast_scorer, repeats=2, n_pairs=800,
-                  skip=("columns",), n_jobs=2)
+                  skip=("columns",))
     assert r.audit is not None and r.columns is None
     assert set(r.skipped) == {"overlap", "chronological", "clock"}
     assert "no event column" in repr(r)
