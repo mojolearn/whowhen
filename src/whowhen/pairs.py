@@ -83,25 +83,18 @@ def _within_unit(frame: Frame, units: np.ndarray, lo: float, hi: float,
 
 
 class _Pool:
-    """Rows of one side indexed by (cohort, time), for impostor draws."""
+    """Rows of one side indexed by time, for impostor draws."""
 
     def __init__(self, frame: Frame, rows: np.ndarray):
-        tcode = np.unique(frame.time, return_inverse=True)[1]
-        n_t = int(tcode.max()) + 1 if len(tcode) else 1
-        self.n_t = n_t
-        self.tcode = tcode
-        c = frame.cohort[frame.unit[rows]] if frame.cohort is not None else 0
-        key = c * n_t + tcode[rows]
-        order = np.argsort(key, kind="stable")
-        self.key, self.rows = key[order], rows[order]
+        order = np.argsort(frame.time[rows], kind="stable")
+        self.time, self.rows = frame.time[rows][order], rows[order]
         self.frame = frame
 
-    def at(self, row: int, unit: int) -> np.ndarray:
-        """Rows observed at ``row``'s time, in ``unit``'s cohort."""
-        c = self.frame.cohort[unit] if self.frame.cohort is not None else 0
-        k = c * self.n_t + self.tcode[row]
-        i0 = np.searchsorted(self.key, k, "left")
-        i1 = np.searchsorted(self.key, k, "right")
+    def at(self, row: int) -> np.ndarray:
+        """Rows observed at ``row``'s time."""
+        t = self.frame.time[row]
+        i0 = np.searchsorted(self.time, t, "left")
+        i1 = np.searchsorted(self.time, t, "right")
         return self.rows[i0:i1]
 
 
@@ -138,7 +131,7 @@ def timing_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
         keep = []
         for a, b in pairs:
             u = frame.unit[a]
-            cand = pool.at(b, u)
+            cand = pool.at(b)
             cand = cand[frame.unit[cand] != u]
             if len(cand):
                 keep.append((a, cand[rng.integers(0, len(cand))]))
@@ -160,8 +153,7 @@ def identity_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
     scorer whole. Returns (row_a, row_b, label, is_train).
 
     impostors="random"   the other unit is any unit observed at the
-                         matched time (in the anchor's cohort, when a
-                         match column is declared).
+                         matched time.
     impostors="nearest"  the other unit is one of the units most like
                          the anchor's unit, by standardized per-unit
                          feature means computed within the side. Such
@@ -181,7 +173,7 @@ def identity_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
         for a, b in same:
             u = frame.unit[a]
             out.append((a, b, 1, side))
-            cand = pool.at(b, u)
+            cand = pool.at(b)
             cand = cand[frame.unit[cand] != u]
             if not len(cand):
                 continue

@@ -196,7 +196,7 @@ def _feature_sets(features) -> dict:
 
 def audit(panel: Panel, features, offset, *, scorer=None,
           which=("identity", "timing"), impostors="random",
-          match: str | None = None, n_pairs: int = 20000,
+          n_pairs: int = 20000,
           max_pairs_per_unit: int = 20, repeats: int = 4,
           bootstrap: int = 2000, random: bool = False,
           seed: int | None = None,
@@ -211,13 +211,11 @@ def audit(panel: Panel, features, offset, *, scorer=None,
         without a clock column, or before and after imputation).
     offset : (min, max) gap between the two rows of a pair, in the time
         column's scale; strings such as ("6h", "24h") for datetimes.
-    scorer : None for the default, 'mojolearn', 'lightgbm', an estimator
+    scorer : None for the default, 'mojolearn', 'catboost', an estimator
         with fit and predict_proba, or a function from a seed to one.
     which : any of 'identity', 'timing', 'placebo'.
     impostors : 'random', 'nearest', or both in a tuple. See
         ``whowhen.pairs.identity_pairs``.
-    match : optional column; an identity pair's two units then share
-        its value (a declared cohort, such as model or vessel type).
     n_pairs, max_pairs_per_unit : how many pairs to draw, and how many
         one unit may contribute.
     repeats : how many times to repeat. Units fall into repeats + 1
@@ -244,7 +242,7 @@ def audit(panel: Panel, features, offset, *, scorer=None,
     seed = pick_seed(seed, random)
     sc = resolve(scorer)
     columns = list(dict.fromkeys(c for v in sets.values() for c in v))
-    frame = panel.frame(columns, match=match)
+    frame = panel.frame(columns)
     frame.repeats, frame.random = repeats, random
     if frame.n_units < 10:
         raise ValueError(f"only {frame.n_units} units without an event; "
@@ -265,31 +263,6 @@ def audit(panel: Panel, features, offset, *, scorer=None,
             "n_rows_audited": int(len(frame.unit)),
             "offset": [str(offset[0]), str(offset[1])],
             "repeats": repeats, "bootstrap": bootstrap, "seed": seed, "random": random,
-            "match": match, "feature_sets": sets, "workers": workers}
+            "feature_sets": sets, "workers": workers}
     return AuditResult(scorer=sc.describe(), info=info,
                        **{kind: _table(runs, kind) for kind in which})
-
-
-def compare(panel: Panel, variants: dict, offset, **kwargs) -> pd.DataFrame:
-    """Audit several named column sets on the same pairs, in one table.
-
-    This is how to compare choices made before modeling, such as raw
-    values against a carried-forward or imputed version: build each
-    version as its own columns and name them here.
-    """
-    r = audit(panel, variants, offset, **kwargs)
-    out = None
-    for kind in KINDS:
-        t = getattr(r, kind)
-        if t is None:
-            continue
-        keys = ["features"] + (["impostors"] if "impostors" in t else [])
-        t = t[keys + ["auc", "lo", "hi"]].rename(
-            columns={"auc": kind, "lo": f"{kind}_lo", "hi": f"{kind}_hi"})
-        if out is None:
-            out = t
-        else:
-            out = out.merge(t, on="features", how="outer", sort=False)
-    out = out.rename(columns={"features": "variant"})
-    out.attrs["scorer"] = r.scorer
-    return out

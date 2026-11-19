@@ -1,6 +1,6 @@
 """Everything in one call.
 
-    print(ww.report(panel))
+    print(ww.report(df, unit="patient_id", time="hour", event="sepsis"))
 
 runs every check the panel supports and says which it skipped and why.
 """
@@ -48,10 +48,12 @@ class Report:
     def __repr__(self) -> str:
         i = self.info
         out = [f"whowhen report: {i['n_units']:,} units, "
-               f"{len(i['features'])} feature columns, pair offset "
-               f"{i['offset'][0]} to {i['offset'][1]}"
-               f"{' (chosen from the data)' if i['offset_chosen'] else ''}",
-               f"scorer: {self.scorer['name']}"]
+               f"{len(i['features'])} columns audited, {i['repeats']} "
+               f"repeats{' (random, seed ' + str(i['seed']) + ')' if i['random'] else ''}"]
+        if i["offset"]:
+            out.append(f"rows of a pair are {i['offset'][0]} to "
+                       f"{i['offset'][1]} apart (chosen from the data)")
+        out.append(f"scorer: {self.scorer['name']}")
         if self.audit is not None:
             for kind in ("identity", "timing"):
                 t = getattr(self.audit, kind)
@@ -72,75 +74,89 @@ class Report:
         return "\n".join(out)
 
 
-def report(panel: Panel, features=None, offset=None, *, horizon=None,
-           scorer=None, match: str | None = None, repeats: int = 4,
-           skip=(), n_pairs: int = 20000,
-           random: bool = False) -> Report:
-    """Run every check the panel supports and return them together.
+def report(df: pd.DataFrame, unit: str, time: str | None = None,
+           event: str | None = None, *, horizon=None, repeats: int = 4,
+           random: bool = False, n_pairs: int = 20000,
+           _scorer=None) -> Report:
+    """Run every check the table supports and return them together.
 
-    Only the panel is required. What is missing decides what runs:
-
-    features : default, every numeric column other than the unit, time
-        and event columns.
-    offset : default, chosen from the data (see Panel.default_offset)
-        and stated in the report.
-    event column on the panel : without one, the overlap check, the
-        chronological control and the clock baseline are skipped.
-    horizon : with one, the event checks forecast ("event within this
-        long after the row"); without one, they use each row's flag.
-    repeats : one number, N. Units fall into N + 1 fixed groups and the
-        checks run N times, each holding out a
-        different group: 1 holds out a half, 2 a third each, 4 (the
-        default) a fifth each.
+    Parameters
+    ----------
+    df : one row per observation.
+    unit : the column naming the unit (patient, machine, loan, vessel).
+    time : the column giving when the row was observed. Without it only
+        the overlap check can run.
+    event : optional column, nonzero where the event happens. Without
+        it the overlap check, the chronological control and the clock
+        baseline are left out.
+    horizon : optional. With it the event checks forecast: "does the
+        event come within this long after the row?", in the time
+        column's scale (a string such as '12h' for datetimes). The
+        event column must then flag the row where the event happens.
+    repeats : one number, N: every check runs N times. Units fall into
+        N + 1 fixed groups and each run holds out a different group: 1
+        holds out a half, 2 a third each, 4 (the default) a fifth each.
     random : False by default, so the same call gives the same numbers
         every time. True draws held-out units and pairs at random,
-        differently on each run; the seed used is recorded in the
-        report and can be passed back as ``seed`` to repeat that run.
-    skip : names from ('audit', 'columns', 'overlap',
-        'chronological', 'clock') to leave out.
+        differently on each run, and records the seed it used.
+    n_pairs : the most row pairs each audit run is trained and tested
+        on. Smaller tables use as many as they have.
+
+    Every numeric column other than these is audited. The gap between
+    the two rows of a pair is chosen from the data and stated in the
+    report. A check that cannot run is listed under "not run" with the
+    reason.
     """
+    if time is None and event is None:
+        raise ValueError("give a time column, an event column, or both; "
+                         "with only a unit column there is nothing to check")
+    no_time = time is None
+    if no_time:
+        time = "__row__"
+        df = df.assign(**{time: df.groupby(unit, sort=False).cumcount()})
+    panel = Panel(df, unit=unit, time=time, event=event)
+    features = [c for c in panel.df.columns if c not in (unit, time, event)
+                and pd.api.types.is_numeric_dtype(panel.df[c])]
+    if not features:
+        raise ValueError("the table has no numeric columns to audit")
     seed = pick_seed(None, random)
-    parts = [p for p in PARTS if p not in skip]
-    unknown = [p for p in skip if p not in PARTS]
-    if unknown:
-        raise ValueError(f"unknown part {unknown}; choose from {PARTS}")
-    if features is None:
-        keys = {panel.unit, panel.time, panel.event, match}
-        features = [c for c in panel.df.columns if c not in keys
-                    and pd.api.types.is_numeric_dtype(panel.df[c])]
-    chosen = offset is None
-    if chosen:
-        offset = panel.default_offset()
-    sc = resolve(scorer)
-    flat = (list(dict.fromkeys(c for v in features.values() for c in v))
-            if isinstance(features, dict) else list(features))
+    sc = resolve(_scorer)
     rep = Report(scorer=sc.describe(), info={
-        "n_units": int(panel.df[panel.unit].nunique()), "features": flat,
-        "offset": [str(offset[0]), str(offset[1])], "offset_chosen": chosen,
-        "horizon": None if horizon is None else str(horizon),
+        "n_units": int(panel.df[unit].nunique()), "features": features,
+        "offset": None, "horizon": None if horizon is None else str(horizon),
         "repeats": repeats, "random": random, "seed": seed})
-    common = dict(seed=seed, random=random)
-    event = dict(model=sc, horizon=horizon, repeats=repeats, **common)
+    common = dict(seed=seed, random=random, repeats=repeats)
+    event_kw = dict(model=sc, horizon=horizon, **common)
+    offset = None
+    if not no_time:
+        try:
+            offset = panel.default_offset()
+            rep.info["offset"] = [str(offset[0]), str(offset[1])]
+        except ValueError as e:
+            no_pairs = str(e)
     steps = {
         "audit": lambda: audit(panel, features, offset, scorer=sc,
-                               match=match, n_pairs=n_pairs, repeats=repeats,
+                               n_pairs=n_pairs,
                                impostors=("random", "nearest"), **common),
-        "columns": lambda: rank_columns(panel, flat, offset, scorer=sc,
-                                        match=match, n_pairs=n_pairs,
-                                        repeats=repeats, **common),
-        "overlap": lambda: overlap_check(panel, flat, **event),
+        "columns": lambda: rank_columns(panel, features, offset, scorer=sc,
+                                        n_pairs=n_pairs, **common),
+        "overlap": lambda: overlap_check(panel, features, **event_kw),
         "chronological": lambda: overlap_check(
-            panel, flat, time_split="chronological", **event),
-        "clock": lambda: clock_baseline(panel, flat, **event),
+            panel, features, time_split="chronological", **event_kw),
+        "clock": lambda: clock_baseline(panel, features, **event_kw),
     }
     for part in PARTS:
-        if part not in parts:
-            continue
-        if part in ("overlap", "chronological", "clock") and not panel.event:
-            rep.skipped[part] = "the panel has no event column"
-            continue
-        try:
-            setattr(rep, part, steps[part]())
-        except ValueError as e:
-            rep.skipped[part] = str(e)
+        if part != "overlap" and no_time:
+            rep.skipped[part] = "no time column was given"
+        elif part in ("audit", "columns") and offset is None:
+            rep.skipped[part] = no_pairs
+        elif part in ("overlap", "chronological", "clock") and not event:
+            rep.skipped[part] = "no event column was given"
+        elif horizon is not None and no_time:
+            rep.skipped[part] = "a horizon needs a time column"
+        else:
+            try:
+                setattr(rep, part, steps[part]())
+            except ValueError as e:
+                rep.skipped[part] = str(e)
     return rep

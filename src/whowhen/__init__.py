@@ -1,8 +1,7 @@
-"""whowhen: audit panel data for identity and timing signal.
+"""whowhen: audit a table of repeated observations for identity and timing signal.
 
     import whowhen as ww
-    panel = ww.Panel(df, unit="patient_id", time="hour", event="sepsis")
-    print(ww.report(panel))
+    print(ww.report(df, unit="patient_id", time="hour", event="sepsis"))
 
 who   can a row be matched to the unit it came from?
 when  can two rows of one unit be put in time order?
@@ -11,16 +10,7 @@ Both are measured as the AUC of a classifier on pairs built so that
 0.5 means no signal. See the README for what the numbers do and do not
 mean.
 """
-from .audit import AuditResult, audit, compare
-from .clock import ClockResult, clock_baseline
-from .columns import rank_columns
-from .overlap import OverlapResult, overlap_check
-from .panel import Panel
 from .report import Report, report
-from .scorers import Scorer, resolve as resolve_scorer
 
 __version__ = "0.1.0"
-__all__ = ["Panel", "report", "Report", "clock_baseline", "ClockResult",
-           "audit", "compare", "rank_columns", "overlap_check",
-           "AuditResult", "OverlapResult", "Scorer",
-           "resolve_scorer", "__version__"]
+__all__ = ["report", "Report", "__version__"]

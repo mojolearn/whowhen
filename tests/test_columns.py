@@ -2,7 +2,8 @@
 import numpy as np
 import pytest
 
-import whowhen as ww
+from whowhen.audit import audit
+from whowhen.panel import Panel
 from whowhen import demo
 from whowhen.audit import draw
 from whowhen.columns import rank_columns
@@ -13,7 +14,7 @@ COLS = demo.CLOCKS + demo.SIG + demo.NOISE
 
 @pytest.fixture(scope="module")
 def panel():
-    return ww.Panel(demo.synthesize(n_units=300, n_days=80),
+    return Panel(demo.synthesize(n_units=300, n_days=80),
                     unit="unit", time="time")
 
 

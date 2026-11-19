@@ -3,10 +3,11 @@
 Anything with ``fit(X, y)`` and ``predict_proba(X)`` works. ``X`` is a
 float32 NumPy array that may contain NaN.
 
-The default is ``mojolearn.GradientBoosting`` with oblivious trees.
-mojolearn has no Windows wheel, so on platforms without one the default
-is LightGBM. Which scorer ran, and with what parameters, is recorded in
-every result; the library never changes scorer without saying so.
+The scorer is ``mojolearn.GradientBoosting`` with oblivious trees.
+mojolearn has no Windows wheel, so on platforms without one the scorer
+is CatBoost, the library mojolearn's boosting follows, with the same
+settings. Which scorer ran, and with what parameters, is recorded in
+every result.
 """
 from __future__ import annotations
 
@@ -19,8 +20,9 @@ from typing import Callable
 MOJOLEARN_PARAMS = dict(loss="Logloss", n_estimators=300, learning_rate=0.05,
                         max_depth=6, grow_policy="SymmetricTree",
                         boosting_type="Plain")
-LIGHTGBM_PARAMS = dict(n_estimators=300, learning_rate=0.05, num_leaves=63,
-                       verbose=-1)
+CATBOOST_PARAMS = dict(loss_function="Logloss", iterations=300,
+                       learning_rate=0.05, depth=6,
+                       grow_policy="SymmetricTree", boosting_type="Plain")
 
 
 def _mojolearn(seed: int, threads: int = 1):
@@ -28,10 +30,11 @@ def _mojolearn(seed: int, threads: int = 1):
     return mojolearn.GradientBoosting(random_state=seed, **MOJOLEARN_PARAMS)
 
 
-def _lightgbm(seed: int, threads: int = 1):
-    import lightgbm
-    return lightgbm.LGBMClassifier(random_state=seed, n_jobs=threads,
-                                   **LIGHTGBM_PARAMS)
+def _catboost(seed: int, threads: int = 1):
+    import catboost
+    return catboost.CatBoostClassifier(random_seed=seed, thread_count=threads,
+                                       verbose=0, allow_writing_files=False,
+                                       **CATBOOST_PARAMS)
 
 
 def _from_estimator(estimator, seed: int, threads: int = 1):
@@ -70,13 +73,13 @@ def _named(name: str) -> Scorer:
         return Scorer("mojolearn.GradientBoosting",
                       {**MOJOLEARN_PARAMS, "version": mojolearn.__version__},
                       _mojolearn)
-    if name == "lightgbm":
-        import lightgbm
-        return Scorer("lightgbm.LGBMClassifier",
-                      {**LIGHTGBM_PARAMS, "version": lightgbm.__version__},
-                      _lightgbm)
+    if name == "catboost":
+        import catboost
+        return Scorer("catboost.CatBoostClassifier",
+                      {**CATBOOST_PARAMS, "version": catboost.__version__},
+                      _catboost)
     raise ValueError(f"unknown scorer {name!r}; use 'mojolearn', "
-                     f"'lightgbm', an estimator, or a factory taking a seed")
+                     f"'catboost', an estimator, or a factory taking a seed")
 
 
 def _describe_estimator(est) -> tuple[str, dict]:
@@ -93,11 +96,11 @@ def resolve(scorer=None) -> Scorer:
     if scorer is None:
         if _have("mojolearn"):
             return _named("mojolearn")
-        if _have("lightgbm"):
-            return _named("lightgbm")
+        if _have("catboost"):
+            return _named("catboost")
         raise ImportError(
-            "no default scorer is installed: pip install mojolearn "
-            "(macOS arm64, Linux x86-64) or lightgbm, or pass scorer=")
+            "no scorer is installed: pip install mojolearn (macOS arm64, "
+            "Linux x86-64) or catboost")
     if isinstance(scorer, Scorer):
         return scorer
     if isinstance(scorer, str):

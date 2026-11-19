@@ -20,7 +20,7 @@ def _fit_auc(frame: Frame, d: Draw, cols: tuple, scorer: Scorer, seed: int,
 
 
 def rank_columns(panel: Panel, columns, offset, *, scorer=None,
-                 which=("identity", "timing"), match: str | None = None,
+                 which=("identity", "timing"),
                  n_pairs: int = 20000, max_pairs_per_unit: int = 20,
                  repeats: int = 4, random: bool = False,
                  seed: int | None = None,
@@ -62,7 +62,7 @@ def rank_columns(panel: Panel, columns, offset, *, scorer=None,
     if not 0 < lo <= hi:
         raise ValueError("offset needs 0 < min <= max")
     sc = resolve(scorer)
-    frame = panel.frame(columns, match=match)
+    frame = panel.frame(columns)
     frame.repeats, frame.random = repeats, random
     if frame.n_units < 10:
         raise ValueError(f"only {frame.n_units} units without an event; "

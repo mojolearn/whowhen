@@ -1,73 +1,53 @@
-"""Command line: a table file and a JSON declaration in, JSON out.
+"""Command line.
 
-    whowhen audit --panel rows.parquet --config audit.json --out r.json
+    whowhen report rows.parquet --unit patient_id --time hour --event sepsis
     whowhen demo
-
-The declaration:
-
-    {"unit": "serial_number", "time": "date", "event": "failure",
-     "features": {"all": ["a", "b", "age"], "no_clock": ["a", "b"]},
-     "offset": ["30D", "90D"],
-     "which": ["identity", "timing"], "impostors": "random",
-     "match": null, "n_pairs": 20000, "repeats": 5, "scorer": null}
-
-Only unit, time, features and offset are required.
 """
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import pandas as pd
 
-from .audit import audit
-from .panel import Panel
-
-PANEL_KEYS = ("unit", "time", "event")
-
-
-def _read(path: Path, columns: list[str]) -> pd.DataFrame:
-    if path.suffix in (".parquet", ".pq"):
-        return pd.read_parquet(path, columns=columns)
-    return pd.read_csv(path, usecols=columns)
+from .report import report
 
 
 def main() -> None:  # pragma: no cover
     ap = argparse.ArgumentParser(prog="whowhen", description=__doc__,
                                  formatter_class=argparse.RawTextHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    a = sub.add_parser("audit", help="audit a table")
-    a.add_argument("--panel", type=Path, required=True,
-                   help="parquet or CSV")
-    a.add_argument("--config", type=Path, required=True)
-    a.add_argument("--out", type=Path, default=None)
-    a.add_argument("--jobs", type=int, default=None)
-    d = sub.add_parser("demo", help="synthetic panel with known answers")
-    d.add_argument("--scorer", default=None)
+    r = sub.add_parser("report", help="check a table")
+    r.add_argument("table", type=Path, help="parquet or CSV")
+    r.add_argument("--unit", required=True)
+    r.add_argument("--time", default=None)
+    r.add_argument("--event", default=None)
+    r.add_argument("--horizon", default=None)
+    r.add_argument("--repeats", type=int, default=4)
+    r.add_argument("--random", action="store_true")
+    r.add_argument("--out", type=Path, default=None, help="write JSON here")
+    d = sub.add_parser("demo", help="synthetic table with known answers")
     d.add_argument("--repeats", type=int, default=3)
-    d.add_argument("--jobs", type=int, default=None)
     args = ap.parse_args()
     if args.cmd == "demo":
         from .demo import run_demo
-        raise SystemExit(0 if run_demo(args.scorer, args.repeats, args.jobs)
-                         else 1)
-    cfg = json.loads(args.config.read_text())
-    feats = cfg["features"]
-    sets = feats if isinstance(feats, dict) else {"all": feats}
-    cols = [cfg[k] for k in PANEL_KEYS if cfg.get(k)]
-    cols += [c for v in sets.values() for c in v]
-    if cfg.get("match"):
-        cols.append(cfg["match"])
-    df = _read(args.panel, list(dict.fromkeys(cols)))
-    panel = Panel(df, **{k: cfg.get(k) for k in PANEL_KEYS})
-    kw = {k: cfg[k] for k in ("which", "impostors", "match", "n_pairs",
-                              "max_pairs_per_unit", "repeats", "bootstrap",
-                              "seed", "scorer") if k in cfg}
-    result = audit(panel, feats, tuple(cfg["offset"]), n_jobs=args.jobs, **kw)
-    print(result)
+        raise SystemExit(0 if run_demo(args.repeats) else 1)
+    df = (pd.read_parquet(args.table)
+          if args.table.suffix in (".parquet", ".pq")
+          else pd.read_csv(args.table))
+    horizon = args.horizon
+    if horizon is not None:
+        try:
+            horizon = float(horizon)
+        except ValueError:
+            pass
+    rep = report(df, unit=args.unit, time=args.time, event=args.event,
+                 horizon=horizon, repeats=args.repeats, random=args.random)
+    print(rep)
     if args.out:
-        result.to_json(args.out)
+        import json
+        args.out.write_text(json.dumps(rep.to_dict(), indent=2, default=str)
+                            + "\n")
 
 
 if __name__ == "__main__":  # pragma: no cover

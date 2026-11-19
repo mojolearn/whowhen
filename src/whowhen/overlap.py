@@ -217,7 +217,7 @@ def overlap_check(panel: Panel, features, *, model=None,
     panel : a ``Panel`` with an event column; the per-row event flag is
         the label.
     features : list of feature columns (one feature set).
-    model : None for the library default, 'mojolearn', 'lightgbm', an
+    model : None for the library default, 'mojolearn', 'catboost', an
         estimator with fit and predict_proba, or a function from a seed
         to one.
     repeats : one number, N. Units fall into N + 1 fixed groups and the

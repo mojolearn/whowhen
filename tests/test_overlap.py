@@ -14,7 +14,8 @@ import pandas as pd
 import pytest
 from sklearn.ensemble import HistGradientBoostingClassifier
 
-import whowhen as ww
+from whowhen.audit import audit
+from whowhen.panel import Panel
 from whowhen.overlap import matched_training, overlap_check, overlap_masks
 
 FEATS = ["level", "s0", "s1", "s2", "s3"]
@@ -44,7 +45,7 @@ def synth(n_units=300, rows=40, seed=0, per_unit_labels=True):
     })
     for j in range(4):
         df[f"s{j}"] = sig[u, j] + rng.normal(0, 0.5, len(u))
-    return ww.Panel(df, unit="unit", time="time", event="event")
+    return Panel(df, unit="unit", time="time", event="event")
 
 
 @pytest.mark.parametrize("split,embargo", [(None, 0.0), ("calendar", 0.0),
@@ -75,7 +76,7 @@ def test_shared_test_equal_counts_and_disjointness(split, embargo):
 
 def test_needs_event_column():
     p = synth()
-    bare = ww.Panel(p.df.drop(columns="event"), unit="unit", time="time")
+    bare = Panel(p.df.drop(columns="event"), unit="unit", time="time")
     with pytest.raises(ValueError, match="event column"):
         overlap_check(bare, FEATS, model=HistGradientBoostingClassifier())
 

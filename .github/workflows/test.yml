@@ -12,9 +12,9 @@ jobs:
       fail-fast: false
       matrix:
         # ubuntu-latest is x86-64, macos-latest is arm64. Windows has no
-        # mojolearn wheel and installs LightGBM by the pyproject marker.
+        # mojolearn wheel and installs CatBoost by the pyproject marker.
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.12"]
     env:
       WHOWHEN_JOBS: 2
     steps:

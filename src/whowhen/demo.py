@@ -79,12 +79,11 @@ def verdicts(result: AuditResult) -> list[tuple]:
     return out
 
 
-def run_demo(scorer=None, repeats: int = 3, n_jobs: int | None = None,
-             quiet: bool = False) -> bool:
+def run_demo(repeats: int = 3, quiet: bool = False, _scorer=None) -> bool:
     panel = Panel(synthesize(), unit="unit", time="time")
-    result = audit(panel, SETS, offset=("30D", "90D"), scorer=scorer,
+    result = audit(panel, SETS, offset=("30D", "90D"), scorer=_scorer,
                    n_pairs=3000, max_pairs_per_unit=4, repeats=repeats,
-                   bootstrap=500, seed=20260821, n_jobs=n_jobs)
+                   bootstrap=500)
     rows = verdicts(result)
     if not quiet:
         print(f"scorer: {result.scorer['name']}\n")
@@ -102,15 +101,10 @@ def run_demo(scorer=None, repeats: int = 3, n_jobs: int | None = None,
 def main() -> None:  # pragma: no cover
     import argparse
     ap = argparse.ArgumentParser(
-        description="Run both audits on a synthetic panel with known "
+        description="Run both audits on a synthetic table with known "
                     "answers")
-    ap.add_argument("--scorer", default=None,
-                    help="mojolearn or lightgbm; default is the "
-                         "platform default")
     ap.add_argument("--repeats", type=int, default=3)
-    ap.add_argument("--jobs", type=int, default=None)
-    a = ap.parse_args()
-    raise SystemExit(0 if run_demo(a.scorer, a.repeats, a.jobs) else 1)
+    raise SystemExit(0 if run_demo(ap.parse_args().repeats) else 1)
 
 
 if __name__ == "__main__":  # pragma: no cover

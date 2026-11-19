@@ -67,7 +67,7 @@ class Panel:
             raise ValueError("units have one row each; nothing to pair")
         return lo, max(lo, span)
 
-    def frame(self, columns: list[str], match: str | None = None,
+    def frame(self, columns: list[str],
               keep_event_units: bool = False) -> "Frame":
         """Plain arrays for the audits. Rows stay sorted by (unit, time)."""
         missing = [c for c in columns if c not in self.df.columns]
@@ -91,17 +91,13 @@ class Panel:
                 X[:, j] = codes
             else:
                 X[:, j] = col.to_numpy(np.float32, na_value=np.nan)
-        cohort = None
-        if match:
-            first = df.groupby(self.unit, sort=False)[match].first()
-            cohort = pd.factorize(first.reindex(labels))[0].astype(np.int64)
         y = None
         if self.event:
             y = (df[self.event].fillna(0).to_numpy() != 0).astype(np.int8)
         starts = np.flatnonzero(np.r_[True, unit[1:] != unit[:-1], True])
         return Frame(unit=unit.astype(np.int64), time=time, X=X,
                      columns=list(columns), starts=starts,
-                     unit_labels=np.asarray(labels), cohort=cohort, y=y,
+                     unit_labels=np.asarray(labels), y=y,
                      n_units_all=int(n_units_all))
 
 
@@ -113,7 +109,6 @@ class Frame:
     columns: list
     starts: np.ndarray        # unit u owns rows starts[u]:starts[u + 1]
     unit_labels: np.ndarray
-    cohort: np.ndarray | None  # per-unit code of the match column
     y: np.ndarray | None       # per-row event flag
     n_units_all: int
     repeats: int = 4          # set by the caller; fixes the unit groups

@@ -4,16 +4,10 @@
 
 First release.
 
-- `Panel`: repeated observations per unit, with unit, time and optional event columns.
-- `audit`: identity, timing and placebo checks.
-- `compare`: audits several named column sets on the same pairs, in one table.
-- Nearest-unit impostors for the identity check (`impostors="nearest"`).
-- `rank_columns`.
-- `overlap_check`: does sharing units between training and test rows change the score?
-- `overlap_check(horizon=...)`: the same check on a forecasting task.
-- `overlap_check(time_split="chronological")`: does a unit's own past help predict its own future?
-- `clock_baseline`: how much of the task elapsed time alone predicts.
-- `report`: every check the panel supports, in one call.
-- Pluggable scorer, with mojolearn as the default and LightGBM as the fallback.
-- Synthetic demo (`whowhen-demo`).
-- Command line (`whowhen`).
+- `report(df, unit, time, event)`: every check the table supports, in one call.
+- Identity and timing audits, with random and nearest-unit impostors.
+- Per-column ranking.
+- Overlap check, chronological control and clock baseline for tables with an event column, as row labels or as a forecast (`horizon`).
+- `repeats=N` runs every check N times on fixed groups of units; `random=True` draws them instead.
+- mojolearn as the classifier, CatBoost where mojolearn has no wheel.
+- Synthetic demo and command line (`whowhen report`, `whowhen demo`).
