@@ -177,8 +177,8 @@ def _table(runs: list[dict], kind: str) -> pd.DataFrame | None:
             if kind == "identity":
                 row["impostors"] = mode
             row.update(auc=float(np.mean(aucs)), lo=float(lo), hi=float(hi),
-                       seed_min=float(np.min(aucs)),
-                       seed_max=float(np.max(aucs)),
+                       lowest_run=float(np.min(aucs)),
+                       highest_run=float(np.max(aucs)),
                        test_rows=int(np.mean([r["n_test"] for r in sub])))
             rows.append(row)
     return pd.DataFrame(rows)
