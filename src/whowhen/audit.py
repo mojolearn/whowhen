@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+
+import joblib
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -17,10 +19,16 @@ from .scorers import Scorer, fit_score, resolve
 KINDS = ("identity", "timing", "placebo")
 
 
+def cores() -> int:
+    """Cores this process may use. Inside a container this is the
+    container's share, not the host's core count."""
+    return joblib.cpu_count()
+
+
 def n_workers(n_jobs: int | None, n_tasks: int) -> int:
     """Workers for ``n_tasks`` independent tasks: every core by default."""
     if n_jobs is None:
-        n_jobs = int(os.environ.get("WHOWHEN_JOBS", 0)) or os.cpu_count() or 1
+        n_jobs = int(os.environ.get("WHOWHEN_JOBS", 0)) or cores()
     return max(1, min(n_jobs, n_tasks))
 
 
@@ -252,7 +260,7 @@ def audit(panel: Panel, features, offset, *, scorer=None,
              for mode in (modes if kind == "identity" else ("random",))
              for k in range(repeats)]
     workers = n_workers(n_jobs, len(tasks))
-    threads = max(1, (os.cpu_count() or 1) // workers)
+    threads = max(1, cores() // workers)
     runs = Parallel(n_jobs=workers)(
         delayed(_one_seed)(frame, kind, mode, k, seed, col_sets, lo, hi,
                            n_pairs, max_pairs_per_unit, bootstrap, sc,

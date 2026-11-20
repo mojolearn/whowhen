@@ -16,7 +16,6 @@ will on new units.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,7 +23,7 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from ._stats import auc
-from .audit import n_workers, pick_seed
+from .audit import cores, n_workers, pick_seed
 from .pairs import unit_groups
 from .panel import Panel
 from .scorers import Scorer, fit_score, resolve
@@ -268,7 +267,7 @@ def overlap_check(panel: Panel, features, *, model=None,
         X, unit, time = X[keep], unit[keep], time[keep]
     groups = unit_groups(frame, repeats + 1)
     workers = n_workers(n_jobs, repeats)
-    threads = max(1, (os.cpu_count() or 1) // workers)
+    threads = max(1, cores() // workers)
     runs = Parallel(n_jobs=workers)(
         delayed(_replicate)(X, y, unit, time, b, seed,
                             groups, random, time_split, emb, sc, threads)

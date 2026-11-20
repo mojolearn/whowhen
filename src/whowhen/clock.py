@@ -11,7 +11,6 @@ observed values per row is added as a second cheap input.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -19,7 +18,7 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from ._stats import auc
-from .audit import n_workers, pick_seed
+from .audit import cores, n_workers, pick_seed
 from .overlap import forecast_labels, held_out
 from .pairs import unit_groups
 from .panel import Panel
@@ -104,7 +103,7 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
                 "features": X, "features + clock": sets["features + clock"]}
     groups = unit_groups(frame, repeats + 1)
     workers = n_workers(n_jobs, repeats)
-    threads = max(1, (os.cpu_count() or 1) // workers)
+    threads = max(1, cores() // workers)
     runs = Parallel(n_jobs=workers)(
         delayed(_replicate)(sets, y, unit, b, seed, groups, random, sc,
                             threads)

@@ -1,14 +1,13 @@
 """Which columns carry the signal: a per-column ranking."""
 from __future__ import annotations
 
-import os
 
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 
 from ._stats import auc
-from .audit import KINDS, Draw, draw, n_workers, pick_seed
+from .audit import KINDS, Draw, cores as n_cores, draw, n_workers, pick_seed
 from .panel import Frame, Panel
 from .scorers import Scorer, resolve
 
@@ -67,7 +66,7 @@ def rank_columns(panel: Panel, columns, offset, *, scorer=None,
     if frame.n_units < 10:
         raise ValueError(f"only {frame.n_units} units without an event; "
                          f"the audits need many units")
-    cores = os.cpu_count() or 1
+    cores = n_cores()
 
     # Phase 1: one draw per (audit, seed), in parallel.
     keys = [(kind, k) for kind in which for k in range(repeats)]
