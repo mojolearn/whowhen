@@ -172,3 +172,27 @@ def test_same_call_gives_the_same_numbers(panel, fast_scorer):
     a = audit(panel, demo.SIG, **kw).identity
     b = audit(panel, demo.SIG, **kw).identity
     assert a.equals(b)
+
+
+def test_groups_are_balanced_for_structured_identifiers():
+    """Identifiers whose CRC-32 values are all multiples of ten once put
+    every unit in one group; the groups must stay near equal."""
+    from types import SimpleNamespace
+    ids = ["100011822", "100011868", "100011998", "100130017", "100259009"]
+    ids += [str(100000000 + 46 * i) for i in range(5000)]
+    g = pairs.unit_groups(SimpleNamespace(unit_labels=ids), 5)
+    share = np.bincount(g, minlength=5) / len(ids)
+    assert share.min() > 0.17 and share.max() < 0.23
+
+
+def test_missing_values_only_among_scored_rows():
+    from whowhen.scorers import fit_score, resolve
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(800, 3)).astype(np.float32)
+    y = (X[:, 0] > 0).astype(int)
+    Xte = X[500:].copy()
+    Xte[::3, 1] = np.nan
+    pytest.importorskip("catboost")
+    s = fit_score(resolve("catboost"), 0, 1, X[:500], y[:500], Xte)
+    assert np.isfinite(s).all()
+    assert ((s > 0.5) == (y[500:] == 1)).mean() > 0.8

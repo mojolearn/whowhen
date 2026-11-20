@@ -191,6 +191,9 @@ def report(df: pd.DataFrame, unit: str, time: str,
         elif (part in ("overlap", "chronological", "time_cut", "clock")
               and not event):
             rep.skipped[part] = "no event column was given"
+        elif (part in ("overlap", "chronological", "time_cut", "clock")
+              and not (panel.df[event].fillna(0) != 0).any()):
+            rep.skipped[part] = f"no row of {event!r} marks an event"
         else:
             try:
                 setattr(rep, part, steps[part]())

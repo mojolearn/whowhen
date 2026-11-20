@@ -227,7 +227,7 @@ def audit(panel: Panel, features, offset, *, scorer=None,
     n_pairs, max_pairs_per_unit : how many pairs to draw, and how many
         one unit may contribute.
     repeats : how many times to repeat. Units fall into repeats + 1
-        fixed groups (by a checksum of the unit identifier) and each
+        fixed groups (by a hash of the unit identifier) and each
         repeat holds out a different group and draws its own pairs: 1
         holds out a half, 2 a third each, 4 a fifth each. More repeats
         test more of the units and leave more to train on.

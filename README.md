@@ -151,7 +151,7 @@ unit.
 ## Repeats and repeatability
 
 `repeats=N` is one number: every check runs N times. Units fall into
-N + 1 fixed groups, by a checksum of the unit identifier, and each run
+N + 1 fixed groups, by a hash of the unit identifier, and each run
 holds out a different group:
 
 | `repeats` | Each run tests |

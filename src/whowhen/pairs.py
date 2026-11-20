@@ -14,7 +14,7 @@ All functions take and return row positions into a ``Frame``.
 """
 from __future__ import annotations
 
-import zlib
+import hashlib
 
 import numpy as np
 
@@ -27,13 +27,17 @@ NEAREST_K = 5        # the impostor is drawn from this many nearest units
 def unit_groups(frame: Frame, n_groups: int) -> np.ndarray:
     """A fixed group, 0 to n_groups - 1, for every unit.
 
-    The group comes from a checksum of the unit's own identifier, so it
+    The group comes from a hash of the unit's own identifier, so it
     does not depend on a seed, on row order, or on which other units
     are in the table, and it is unrelated to anything the identifier's
-    order might track (time of entry, site).
+    order might track (time of entry, site). The hash is BLAKE2, not a
+    CRC: a CRC is linear, and identifiers that share a structure (a
+    check digit, for example) can all land in one group.
     """
-    return np.fromiter((zlib.crc32(str(u).encode()) % n_groups
-                        for u in frame.unit_labels), np.int64,
+    def group(u) -> int:
+        h = hashlib.blake2b(str(u).encode(), digest_size=8).digest()
+        return int.from_bytes(h, "big") % n_groups
+    return np.fromiter((group(u) for u in frame.unit_labels), np.int64,
                        len(frame.unit_labels))
 
 

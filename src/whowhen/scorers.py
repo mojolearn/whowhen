@@ -123,6 +123,19 @@ def fit_score(scorer: Scorer, seed: int, threads: int, X_train, y_train,
     import numpy as np
     from threadpoolctl import threadpool_limits
     est = scorer.make(seed, threads)
+    # A column with a missing value among the scored rows but none among
+    # the training rows: the boosting libraries refuse it. They treat a
+    # missing value as below every observed one, so say that directly.
+    X_test = np.asarray(X_test)
+    gap = np.isnan(X_test).any(axis=0) & ~np.isnan(X_train).any(axis=0)
+    if gap.any():
+        X_test = X_test.copy()
+        low = X_train[:, gap].min(axis=0)
+        low = (low - np.abs(low) - 1).astype(X_test.dtype)
+        block = X_test[:, gap]
+        block[np.isnan(block)] = np.broadcast_to(low, block.shape)[
+            np.isnan(block)]
+        X_test[:, gap] = block
     # Workers share the machine: each fit gets its share of the cores,
     # whichever threading library the estimator uses underneath.
     with threadpool_limits(limits=threads):
