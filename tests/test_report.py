@@ -66,12 +66,16 @@ def test_report_runs_everything(fast_scorer):
                   horizon=12, repeats=2, n_pairs=1500, _scorer=fast_scorer)
     assert r.info["features"] == ["level", "noise"]
     assert r.info["offset"] and not r.skipped, r.skipped
-    for part in ("audit", "columns", "overlap", "chronological", "clock"):
+    for part in ("audit", "gaps", "columns", "overlap", "chronological",
+                 "time_cut", "clock"):
         assert getattr(r, part) is not None
+    assert set(r.gaps["audit"]) == {"identity", "timing"}
+    assert len(r.gaps) == 4 and r.gaps["gap"].str.startswith("short").sum() == 2
     assert set(r.audit.identity["impostors"]) == {"random", "nearest"}
     assert r.audit.placebo is not None and "timing placebo" in repr(r)
     assert "clock baseline" in repr(r) and "identity audit" in repr(r)
-    assert set(r.to_dict()) >= {"audit", "columns", "overlap", "clock"}
+    assert set(r.to_dict()) >= {"audit", "gaps", "columns", "overlap",
+                                "time_cut", "clock"}
 
 
 def test_report_without_event(fast_scorer):
@@ -79,7 +83,7 @@ def test_report_without_event(fast_scorer):
     r = ww.report(df, unit="unit", time="time", repeats=1, n_pairs=800,
                   _scorer=fast_scorer)
     assert r.audit is not None and r.columns is not None
-    assert set(r.skipped) == {"overlap", "chronological", "clock"}
+    assert set(r.skipped) == {"overlap", "chronological", "time_cut", "clock"}
     assert "no event column" in repr(r)
 
 

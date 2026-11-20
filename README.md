@@ -44,8 +44,8 @@ What runs depends on what you give:
 
 | You give | You get |
 |---|---|
-| `unit` and `time` | the identity and timing audits, the timing placebo, the individual-or-type test, the per-column ranking |
-| plus `event` | the overlap check, the chronological control, the clock baseline |
+| `unit` and `time` | the identity and timing audits, the timing placebo, the individual-or-type test, the audits by short and long gap, the per-column ranking |
+| plus `event` | the overlap check, the chronological control, the time-cut split, the clock baseline |
 | plus `horizon` | those three run as a forecast: "does the event come within this long after the row?" |
 
 A check that cannot run is listed at the end of the report with the
@@ -98,6 +98,11 @@ If the score stays high, individual units are recognizable. If it
 falls toward 0.5, the columns identify the kind of unit, not the
 individual.
 
+**Short and long gaps.** Both audits again, once with the two rows of
+a pair in the shorter half of the gap range and once in the longer
+half. If identity stays high at the long gap, units stay recognizable
+as time passes.
+
 **Columns.** For each column: the audit using that column alone, and
 how much the full score drops when that column is removed.
 
@@ -110,6 +115,11 @@ between training and test is worth on your task.
 **Chronological control.** The same check, testing the later half of
 each test unit's rows and letting training see the earlier half: does
 a unit's own past help predict its own future?
+
+**Time-cut split.** The same check with a single cut in the time
+column: test rows come after it, training rows before it. When the
+time column is a shared calendar, this is the usual split by date, and
+the gap shows how much unit overlap such a split leaves in place.
 
 **Clock baseline.** Many event tasks can be scored well above chance
 from one number: how long the unit has been observed. This fits the

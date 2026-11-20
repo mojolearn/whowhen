@@ -17,7 +17,8 @@ from .overlap import OverlapResult, overlap_check
 from .panel import Panel
 from .scorers import resolve
 
-PARTS = ("audit", "columns", "overlap", "chronological", "clock")
+PARTS = ("audit", "gaps", "columns", "overlap", "chronological", "time_cut",
+         "clock")
 
 
 @dataclass
@@ -27,19 +28,24 @@ class Report:
     scorer: dict
     info: dict
     audit: AuditResult | None = None
+    gaps: pd.DataFrame | None = None
     columns: dict | None = None
     overlap: OverlapResult | None = None
     chronological: OverlapResult | None = None
+    time_cut: OverlapResult | None = None
     clock: ClockResult | None = None
     skipped: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d = {"scorer": self.scorer, "info": self.info,
              "skipped": self.skipped}
-        for part in ("audit", "overlap", "chronological", "clock"):
+        for part in ("audit", "overlap", "chronological", "time_cut",
+                     "clock"):
             r = getattr(self, part)
             if r is not None:
                 d[part] = r.to_dict()
+        if self.gaps is not None:
+            d["gaps"] = self.gaps.to_dict(orient="records")
         if self.columns is not None:
             d["columns"] = {k: t.to_dict(orient="records")
                             for k, t in self.columns.items()}
@@ -68,11 +74,14 @@ class Report:
                         "near 0.5: the timing signal is each unit's own. "
                         "near the timing audit: it is change shared by all "
                         "units."]
+        if self.gaps is not None:
+            out += ["", "the audits by how far apart the two rows are",
+                    self.gaps.round(3).to_string(index=False)]
         if self.columns is not None:
             for kind, t in self.columns.items():
                 out += ["", f"columns by {kind} signal",
                         t.head(10).round(3).to_string(index=False)]
-        for part in ("overlap", "chronological", "clock"):
+        for part in ("overlap", "chronological", "time_cut", "clock"):
             r = getattr(self, part)
             if r is not None:
                 out += ["", repr(r)]
@@ -142,7 +151,29 @@ def report(df: pd.DataFrame, unit: str, time: str,
         rep.info["offset"] = [str(offset[0]), str(offset[1])]
     except ValueError as e:
         no_pairs = str(e)
+    def gaps():
+        """The audits on the shorter and the longer half of the gap range."""
+        lo, hi = offset
+        if not lo < hi:
+            raise ValueError("every pair of rows is the same gap apart")
+        mid = lo + (hi - lo) / 2
+        out = []
+        for name, (a, b) in (("short", (lo, mid)), ("long", (mid, hi))):
+            r = audit(panel, features, (a, b), scorer=sc, n_pairs=n_pairs,
+                      **common)
+            for kind in ("identity", "timing"):
+                t = getattr(r, kind).drop(columns="impostors",
+                                          errors="ignore")
+                t.insert(0, "audit", kind)
+                t.insert(1, "gap", f"{name}: {a} to {b}")
+                out.append(t)
+        return pd.concat(out, ignore_index=True).sort_values(
+            ["audit", "features"], kind="stable", ignore_index=True)
+
     steps = {
+        "gaps": gaps,
+        "time_cut": lambda: overlap_check(
+            panel, flat, time_split="calendar", **event_kw),
         "audit": lambda: audit(panel, features, offset, scorer=sc,
                                n_pairs=n_pairs,
                                which=("identity", "timing", "placebo"),
@@ -155,9 +186,10 @@ def report(df: pd.DataFrame, unit: str, time: str,
         "clock": lambda: clock_baseline(panel, flat, **event_kw),
     }
     for part in PARTS:
-        if part in ("audit", "columns") and offset is None:
+        if part in ("audit", "gaps", "columns") and offset is None:
             rep.skipped[part] = no_pairs
-        elif part in ("overlap", "chronological", "clock") and not event:
+        elif (part in ("overlap", "chronological", "time_cut", "clock")
+              and not event):
             rep.skipped[part] = "no event column was given"
         else:
             try:

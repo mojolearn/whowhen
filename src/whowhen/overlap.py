@@ -195,7 +195,12 @@ class OverlapResult:
         return s
 
     def __repr__(self) -> str:
-        split = self.info.get("time_split") or "random half of test-unit rows"
+        split = {None: "a random half of each test unit's rows is tested",
+                 "chronological": "the later half of each test unit's rows "
+                                  "is tested",
+                 "calendar": "rows after a cut in time are tested, earlier "
+                             "rows are trained on",
+                 }[self.info.get("time_split")]
         return (f"overlap check ({self.repeats} repeats, "
                 f"split: {split}, scorer: {self.scorer['name']})\n"
                 f"  AUC overlap  {self.auc_overlap:.3f}\n"
