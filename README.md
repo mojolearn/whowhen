@@ -13,7 +13,7 @@ scoring well by recognizing units or reading the clock.
 ## Install
 
 ```
-pip install git+https://github.com/mojolearn/whowhen
+pip install whowhen
 ```
 
 ## Use
