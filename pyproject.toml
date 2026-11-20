@@ -44,7 +44,6 @@ Repository = "https://github.com/mojolearn/whowhen"
 
 [project.scripts]
 whowhen = "whowhen.cli:main"
-whowhen-demo = "whowhen.demo:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

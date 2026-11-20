@@ -1,7 +1,6 @@
 """Run the audits and report."""
 from __future__ import annotations
 
-import json
 import os
 
 import joblib
@@ -152,13 +151,6 @@ class AuditResult:
             if t is not None:
                 d[kind] = t.to_dict(orient="records")
         return d
-
-    def to_json(self, path=None, indent: int = 2) -> str:
-        s = json.dumps(self.to_dict(), indent=indent, default=str)
-        if path:
-            with open(path, "w") as f:
-                f.write(s + "\n")
-        return s
 
     def __repr__(self) -> str:
         lines = [f"scorer: {self.scorer['name']}"]

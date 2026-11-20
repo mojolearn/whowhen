@@ -2,7 +2,6 @@
 import numpy as np
 import pytest
 
-from whowhen.audit import audit
 from whowhen.panel import Panel
 from whowhen import demo
 from whowhen.audit import draw

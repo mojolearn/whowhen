@@ -14,7 +14,6 @@ import pandas as pd
 import pytest
 from sklearn.ensemble import HistGradientBoostingClassifier
 
-from whowhen.audit import audit
 from whowhen.panel import Panel
 from whowhen.overlap import matched_training, overlap_check, overlap_masks
 
@@ -48,14 +47,12 @@ def synth(n_units=300, rows=40, seed=0, per_unit_labels=True):
     return Panel(df, unit="unit", time="time", event="event")
 
 
-@pytest.mark.parametrize("split,embargo", [(None, 0.0), ("calendar", 0.0),
-                                           ("calendar", 5 * 86400e9)])
-def test_shared_test_equal_counts_and_disjointness(split, embargo):
+@pytest.mark.parametrize("split", [None, "calendar"])
+def test_shared_test_equal_counts_and_disjointness(split):
     f = synth(seed=1).frame(FEATS, keep_event_units=True)
     rng = np.random.default_rng(1)
     te, leak, base = overlap_masks(f.unit, f.time, rng,
-                                   rng.random(f.n_units) < 0.2, split,
-                                   embargo)
+                                   rng.random(f.n_units) < 0.2, split)
     assert te.sum() > 0 and leak.sum() > 0 and base.sum() > 0
     assert not (te & leak).any() and not (te & base).any()
     ov, dj, _ = matched_training(f.y, leak, base, rng)
@@ -70,7 +67,7 @@ def test_shared_test_equal_counts_and_disjointness(split, embargo):
     assert not te[swapped].any()
     if split == "calendar":
         cut = np.quantile(f.time, 0.8)
-        assert f.time[np.concatenate([ov, dj])].max() <= cut - embargo
+        assert f.time[np.concatenate([ov, dj])].max() <= cut
         assert f.time[te].min() > cut
 
 
@@ -105,5 +102,5 @@ def test_independent_labels_no_inflation():
 
 def test_calendar_split_runs():
     r = overlap_check(synth(seed=4), FEATS, time_split="calendar",
-                      embargo="3D", **{**KW, "repeats": 4})
+                      **{**KW, "repeats": 4})
     assert r.info["time_split"] == "calendar" and r.repeats == 4

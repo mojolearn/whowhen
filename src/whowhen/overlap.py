@@ -15,7 +15,6 @@ will on new units.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 import numpy as np
@@ -32,8 +31,7 @@ TIME_SPLITS = (None, "calendar", "chronological")
 
 
 def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
-                  test_units: np.ndarray, time_split: str | None = None,
-                  embargo: float = 0.0):
+                  test_units: np.ndarray, time_split: str | None = None):
     """(test, leak, base) boolean row masks for one repeat.
 
     ``test_units`` flags the held-out units. Without a time split, test
@@ -41,7 +39,7 @@ def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
     the other half. With ``time_split="calendar"``, the cut leaves the
     same share of rows after it as the share of units held out: test
     rows are test-unit rows after the cut, and leak and base rows are at
-    or before ``cut - embargo``. Base rows are rows of units that are
+    or before it. Base rows are rows of units that are
     not test units. Leak and base never contain a test row; base never
     contains a row of a test unit.
     """
@@ -51,7 +49,7 @@ def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
         return tu & half, tu & ~half, ~tu
     if time_split == "calendar":
         cut = float(np.quantile(time, 1.0 - test_units.mean()))
-        early = time <= cut - embargo
+        early = time <= cut
         return tu & (time > cut), tu & early, ~tu & early
     if time_split == "chronological":
         # rows are sorted by (unit, time): the later half of each test
@@ -136,13 +134,13 @@ def held_out(groups: np.ndarray, b: int, random: bool,
 
 
 def _replicate(X, y, unit, time, b: int, seed: int, groups, random: bool,
-               time_split, embargo: float, scorer: Scorer,
+               time_split, scorer: Scorer,
                threads: int) -> dict | None:
     """One unit split, one matched pair of fits. None if a class is absent."""
     rng = np.random.default_rng([seed, b])
     te, leak, base = overlap_masks(unit, time, rng,
                                    held_out(groups, b, random, rng),
-                                   time_split, embargo)
+                                   time_split)
     ov, dj, share = matched_training(y, leak, base, rng)
     tei = np.flatnonzero(te)
     if not (_two_classes(y[tei]) and _two_classes(y[dj])):
@@ -187,13 +185,6 @@ class OverlapResult:
                 "info": self.info,
                 "per_replicate": self.per_replicate.to_dict(orient="records")}
 
-    def to_json(self, path=None, indent: int = 2) -> str:
-        s = json.dumps(self.to_dict(), indent=indent, default=str)
-        if path:
-            with open(path, "w") as f:
-                f.write(s + "\n")
-        return s
-
     def __repr__(self) -> str:
         split = {None: "a random half of each test unit's rows is tested",
                  "chronological": "the later half of each test unit's rows "
@@ -211,7 +202,7 @@ class OverlapResult:
 
 def overlap_check(panel: Panel, features, *, model=None,
                   repeats: int = 4,
-                  time_split: str | None = None, embargo=None,
+                  time_split: str | None = None,
                   horizon=None, random: bool = False, seed: int | None = None,
                   n_jobs: int | None = None) -> OverlapResult:
     """Measure how much sharing units between training and test inflates AUC.
@@ -240,9 +231,6 @@ def overlap_check(panel: Panel, features, *, model=None,
         "chronological" to test the later half of each test unit's rows
         and let the overlap arm train on the earlier half, which asks
         whether a unit's own past helps predict its own future.
-    embargo : with "calendar", training rows must be at or before
-        ``cut - embargo``; an offset in the time column's scale (a string
-        such as '30D' for datetimes).
     n_jobs : parallel workers over repeats; every core by default, or
         the WHOWHEN_JOBS environment variable.
     """
@@ -252,14 +240,9 @@ def overlap_check(panel: Panel, features, *, model=None,
     if time_split not in TIME_SPLITS:
         raise ValueError(f"time_split must be one of {TIME_SPLITS}; "
                          f"got {time_split!r}")
-    if embargo is not None and time_split != "calendar":
-        raise ValueError("embargo applies only with time_split='calendar'")
     features = list(features)
     if not features:
         raise ValueError("the feature set needs at least one column")
-    emb = panel.offset(embargo) if embargo is not None else 0.0
-    if emb < 0:
-        raise ValueError("embargo must be non-negative")
     seed = pick_seed(seed, random)
     sc = resolve(model)
     frame = panel.frame(features, keep_event_units=True)
@@ -275,7 +258,7 @@ def overlap_check(panel: Panel, features, *, model=None,
     threads = max(1, cores() // workers)
     runs = Parallel(n_jobs=workers)(
         delayed(_replicate)(X, y, unit, time, b, seed,
-                            groups, random, time_split, emb, sc, threads)
+                            groups, random, time_split, sc, threads)
         for b in range(repeats))
     runs = [r for r in runs if r is not None]
     if not runs:
@@ -287,7 +270,6 @@ def overlap_check(panel: Panel, features, *, model=None,
             "n_rows": int(len(y)), "event_rate": float(y.mean()),
             "random": random, "time_split": time_split,
             "horizon": None if horizon is None else str(horizon),
-            "embargo": None if embargo is None else str(embargo),
             "repeats_requested": repeats, "seed": seed,
             "workers": workers}
     return OverlapResult(gap=float(per["gap"].mean()), lo=float(lo),

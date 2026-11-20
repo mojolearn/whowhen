@@ -6,3 +6,4 @@ build/
 .pytest_cache/
 whowhen_demo/
 *.parquet
+.coverage

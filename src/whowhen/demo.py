@@ -97,15 +97,3 @@ def run_demo(repeats: int = 3, quiet: bool = False, _scorer=None) -> bool:
               else "\nat least one check MISSED")
     return all(r[-1] for r in rows)
 
-
-def main() -> None:  # pragma: no cover
-    import argparse
-    ap = argparse.ArgumentParser(
-        description="Run both audits on a synthetic table with known "
-                    "answers")
-    ap.add_argument("--repeats", type=int, default=3)
-    raise SystemExit(0 if run_demo(ap.parse_args().repeats) else 1)
-
-
-if __name__ == "__main__":  # pragma: no cover
-    main()
