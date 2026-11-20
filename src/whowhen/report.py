@@ -36,9 +36,38 @@ class Report:
     clock: ClockResult | None = None
     skipped: dict = field(default_factory=dict)
 
+    def headline(self) -> dict:
+        """One number per check, for scripts. With several feature sets
+        an audit's number is the highest across them. A check that did
+        not run has no entry."""
+        h = {}
+        if self.audit is not None:
+            t = self.audit.identity
+            if t is not None:
+                for mode, name in (("random", "identity"),
+                                   ("nearest", "identity_nearest")):
+                    sub = t[t["impostors"] == mode]
+                    if len(sub):
+                        h[name] = float(sub["auc"].max())
+            for kind in ("timing", "placebo"):
+                t = getattr(self.audit, kind)
+                if t is not None:
+                    h[kind] = float(t["auc"].max())
+        for part, name in (("overlap", "overlap_gap"),
+                           ("chronological", "chronological_gap"),
+                           ("time_cut", "time_cut_gap")):
+            r = getattr(self, part)
+            if r is not None:
+                h[name] = float(r.gap)
+        if self.clock is not None:
+            t = self.clock.table.set_index("input")["auc"]
+            h["clock"] = float(t["clock"])
+            h["clock_gain"] = float(self.clock.gain)
+        return h
+
     def to_dict(self) -> dict:
         d = {"scorer": self.scorer, "info": self.info,
-             "skipped": self.skipped}
+             "skipped": self.skipped, "headline": self.headline()}
         for part in ("audit", "overlap", "chronological", "time_cut",
                      "clock"):
             r = getattr(self, part)

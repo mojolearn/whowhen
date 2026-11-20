@@ -161,3 +161,20 @@ def test_whole_report_is_the_same_every_time(fast_scorer):
                       "time_cut", "clock"}
     assert "placebo" in a["audit"]
     assert a == b
+    assert set(a["headline"]) == {
+        "identity", "identity_nearest", "timing", "placebo", "overlap_gap",
+        "chronological_gap", "time_cut_gap", "clock", "clock_gain"}
+
+
+def test_fail_if_conditions():
+    from whowhen.cli import check, parse_condition
+    assert parse_condition("overlap_gap > 0.02") == ("overlap_gap", ">", 0.02)
+    assert parse_condition("clock_gain<=-0.5") == ("clock_gain", "<=", -0.5)
+    for bad in ("overlap_gap", "nonsense > 1", "identity == 0.5"):
+        with pytest.raises(ValueError):
+            parse_condition(bad)
+    numbers = {"overlap_gap": 0.031, "identity": 0.97}
+    held, missing = check(["overlap_gap > 0.02", "identity > 0.99",
+                           "clock_gain < 0.01"], numbers)
+    assert len(held) == 1 and held[0].startswith("overlap_gap is 0.031")
+    assert missing == ["clock_gain: this check did not run"]

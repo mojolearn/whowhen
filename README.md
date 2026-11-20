@@ -187,6 +187,30 @@ whowhen report rows.parquet --unit patient_id --time hour --event sepsis
 whowhen demo
 ```
 
+To use a report in a script or a scheduled job, say what counts as a
+failure:
+
+```
+whowhen report rows.parquet --unit patient_id --time hour --event sepsis \
+    --fail-if "overlap_gap > 0.02" --fail-if "clock_gain < 0.01"
+```
+
+The command exits with 1 if any condition holds, and with 2 if a
+condition names a check that did not run. You choose the conditions;
+there are no built-in thresholds.
+
+| Name | The number |
+|---|---|
+| `identity`, `identity_nearest` | identity AUC against any other unit, and against the most similar units |
+| `timing`, `placebo` | timing AUC, and its placebo |
+| `overlap_gap`, `chronological_gap`, `time_cut_gap` | overlap AUC minus disjoint AUC under each split |
+| `clock` | AUC of the clock alone |
+| `clock_gain` | what the columns add once the clock is known |
+
+With several named feature sets, an audit's number is the highest
+across them. A high identity AUC is normal for many tables and is not
+by itself a failure; the gaps say whether it matters for your task.
+
 ## Citing
 
 The method is described in:
