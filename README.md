@@ -177,7 +177,9 @@ The checks use [mojolearn](https://github.com/mojolearn/mojolearn)'s
 `GradientBoosting` with oblivious (symmetric) trees. mojolearn ships
 wheels for macOS on Apple silicon and Linux on x86-64. On other
 platforms, including Windows, CatBoost is installed and used instead,
-with the same settings. The report names the classifier that ran.
+with the same settings. The report names the whowhen version and DOI,
+and the classifier that ran with its version and, where the classifier
+declares one, its DOI.
 
 Independent runs are spread across all cores. Set the `WHOWHEN_JOBS`
 environment variable to use fewer.

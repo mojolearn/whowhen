@@ -88,7 +88,13 @@ class Report:
         if i["offset"]:
             out.append(f"rows of a pair are {i['offset'][0]} to "
                        f"{i['offset'][1]} apart (chosen from the data)")
-        out.append(f"scorer: {self.scorer['name']}")
+        w = i.get("whowhen")
+        if w:
+            out.append(f"whowhen {w['version']} (doi:{w['doi']})")
+        p = self.scorer.get("params", {})
+        out.append(f"scorer: {self.scorer['name']}"
+                   + (f" {p['version']}" if "version" in p else "")
+                   + (f" (doi:{p['doi']})" if "doi" in p else ""))
         if self.audit is not None:
             for kind in ("identity", "timing"):
                 t = getattr(self.audit, kind)
@@ -168,7 +174,9 @@ def report(df: pd.DataFrame, unit: str, time: str,
         raise ValueError("there are no columns to check")
     seed = pick_seed(None, random)
     sc = resolve(_scorer)
+    from . import __doi__, __version__
     rep = Report(scorer=sc.describe(), info={
+        "whowhen": {"version": __version__, "doi": __doi__},
         "n_units": int(panel.df[unit].nunique()), "features": flat,
         "offset": None, "horizon": None if horizon is None else str(horizon),
         "repeats": repeats, "random": random, "seed": seed})

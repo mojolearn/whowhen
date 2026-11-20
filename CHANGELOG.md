@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 (unreleased)
+
+- The report records the whowhen version and DOI, and the classifier's DOI beside its version.
+
 ## 0.1.1
 
 Same code as 0.1.0. Adds the DOI to the README and the citation file.

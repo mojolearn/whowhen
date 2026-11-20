@@ -178,3 +178,22 @@ def test_fail_if_conditions():
                            "clock_gain < 0.01"], numbers)
     assert len(held) == 1 and held[0].startswith("overlap_gap is 0.031")
     assert missing == ["clock_gain: this check did not run"]
+
+
+def test_report_names_the_software_that_ran(fast_scorer):
+    from whowhen.scorers import _doi
+    df = event_table().drop(columns="event")
+    r = ww.report(df, unit="unit", time="time", repeats=1, n_pairs=600,
+                  _scorer=fast_scorer)
+    assert r.to_dict()["info"]["whowhen"] == {
+        "version": ww.__version__, "doi": ww.__doi__}
+    assert f"whowhen {ww.__version__} (doi:{ww.__doi__})" in repr(r)
+    assert _doi("a-package-that-is-not-installed") == {}
+
+
+def test_default_scorer_is_named_with_its_version(default_scorer_runs):
+    from whowhen.scorers import resolve
+    sc = resolve(None)
+    assert sc.params["version"]
+    if sc.name.startswith("mojolearn"):
+        assert sc.params["doi"].startswith("10.")

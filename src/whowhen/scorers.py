@@ -67,11 +67,27 @@ def _have(module: str) -> bool:
     return importlib.util.find_spec(module) is not None
 
 
+def _doi(package: str) -> dict:
+    """{"doi": ...} from the DOI the installed package declares in its
+    metadata, or {} if it declares none."""
+    from importlib.metadata import PackageNotFoundError, metadata
+    try:
+        urls = metadata(package).get_all("Project-URL") or []
+    except PackageNotFoundError:
+        return {}
+    for entry in urls:
+        label, _, url = entry.partition(",")
+        if label.strip().lower() == "doi":
+            return {"doi": url.strip().removeprefix("https://doi.org/")}
+    return {}
+
+
 def _named(name: str) -> Scorer:
     if name == "mojolearn":
         import mojolearn
         return Scorer("mojolearn.GradientBoosting",
-                      {**MOJOLEARN_PARAMS, "version": mojolearn.__version__},
+                      {**MOJOLEARN_PARAMS, "version": mojolearn.__version__,
+                       **_doi("mojolearn")},
                       _mojolearn)
     if name == "catboost":
         import catboost
