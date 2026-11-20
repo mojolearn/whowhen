@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.2 (unreleased)
+## 0.1.2
 
 - The report records the whowhen version and DOI, and the classifier's DOI beside its version.
 
