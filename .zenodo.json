@@ -2,7 +2,7 @@
   "title": "whowhen: audit panel data for identity and timing signals",
   "upload_type": "software",
   "creators": [
-    {"name": "Hendel, Andrew"}
+    {"name": "Hendel, Andrew", "orcid": "0009-0000-9877-3623"}
   ],
   "license": "Apache-2.0",
   "keywords": ["data leakage", "evaluation", "panel data", "dataset audit", "time series"],
