@@ -147,3 +147,17 @@ def test_placebo_separates_own_change_from_shared_change(fast_scorer):
     assert timing > 0.58 and placebo < 0.56
     timing, placebo = run(shared=True)
     assert timing > 0.58 and placebo > 0.58
+
+
+def test_whole_report_is_the_same_every_time(fast_scorer):
+    """Every part of the report, run twice, gives identical numbers."""
+    def run():
+        return ww.report(event_table(n_units=200), unit="unit", time="time",
+                         event="event", horizon=12, repeats=2, n_pairs=800,
+                         _scorer=fast_scorer).to_dict()
+    a, b = run(), run()
+    assert not a["skipped"], a["skipped"]
+    assert set(a) >= {"audit", "gaps", "columns", "overlap", "chronological",
+                      "time_cut", "clock"}
+    assert "placebo" in a["audit"]
+    assert a == b
