@@ -75,4 +75,4 @@ jobs:
         run: |
           pip install dist/*.whl
           cd "$RUNNER_TEMP"
-          whowhen demo --repeats 1
+          whowhen demo

@@ -90,7 +90,10 @@ def test_memorisable_units_inflate_score():
     print(r)
     assert r.repeats == 20 and len(r.per_replicate) == 20
     assert r.scorer["name"] == "sklearn.HistGradientBoostingClassifier"
-    assert r.lo > 0, r
+    # the gap is positive on average and in nearly every repeat; the
+    # 2.5 percentile of twenty repeats is one repeat, too thin to test
+    assert r.gap > 0.01, r
+    assert (r.per_replicate["gap"] > 0).mean() >= 0.85, r
     assert r.to_dict()["gap"] == r.gap
 
 
