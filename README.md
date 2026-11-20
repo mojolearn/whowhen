@@ -1,5 +1,7 @@
 # whowhen
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24406266.svg)](https://doi.org/10.5281/zenodo.24406266)
+
 Check a table of repeated observations per unit (patients, machines,
 loans, users, vessels) for two signals a model can exploit without
 predicting anything:
@@ -217,6 +219,9 @@ The method is described in:
 
 > Andrew Hendel. Auditing Identity and Timing Signals in Operational
 > Logs. 2026. Under review.
+
+The library is archived on Zenodo. This DOI always points to the newest
+version: [10.5281/zenodo.24406266](https://doi.org/10.5281/zenodo.24406266).
 
 See `CITATION.cff`.
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+Same code as 0.1.0. Adds the DOI to the README and the citation file.
+
 ## 0.1.0
 
 First release.
