@@ -5,7 +5,7 @@ type: software
 authors:
   - given-names: Andrew
     family-names: Hendel
-license: MIT
+license: Apache-2.0
 repository-code: "https://github.com/mojolearn/whowhen"
 version: 0.1.0
 preferred-citation:

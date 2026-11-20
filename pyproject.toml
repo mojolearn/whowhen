@@ -7,14 +7,14 @@ name = "whowhen"
 version = "0.1.0"
 description = "Audit panel data for identity and timing signals a model can exploit without predicting anything"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 authors = [{name = "Andrew Hendel"}]
 requires-python = ">=3.10"
 keywords = ["data leakage", "evaluation", "panel data", "dataset audit", "time series"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]

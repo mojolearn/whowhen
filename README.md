@@ -182,4 +182,4 @@ See `CITATION.cff`.
 
 ## License
 
-MIT.
+Apache License 2.0. See `LICENSE`.

@@ -4,7 +4,7 @@
   "creators": [
     {"name": "Hendel, Andrew"}
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["data leakage", "evaluation", "panel data", "dataset audit", "time series"],
   "description": "whowhen is a Python library that audits panel data for identity and timing signals a model can exploit without predicting anything. It measures whether a row can be matched to the unit it came from and whether two rows of one unit can be put in time order."
 }
