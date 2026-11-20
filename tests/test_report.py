@@ -69,6 +69,7 @@ def test_report_runs_everything(fast_scorer):
     for part in ("audit", "columns", "overlap", "chronological", "clock"):
         assert getattr(r, part) is not None
     assert set(r.audit.identity["impostors"]) == {"random", "nearest"}
+    assert r.audit.placebo is not None and "timing placebo" in repr(r)
     assert "clock baseline" in repr(r) and "identity audit" in repr(r)
     assert set(r.to_dict()) >= {"audit", "columns", "overlap", "clock"}
 
@@ -118,3 +119,27 @@ def test_catboost_fallback_runs():
     s = fit_score(sc, 0, 1, X[:400], y[:400], X[400:])
     assert sc.name == "catboost.CatBoostClassifier"
     assert ((s > 0.5) == (y[400:] == 1)).mean() > 0.7
+
+
+def ageing_table(shared_start, n=300, m=30, seed=0):
+    """Each unit has a column that counts its own rows. With
+    ``shared_start`` every unit starts at time 0, so that count is the
+    same for all units at a given time."""
+    rng = np.random.default_rng(seed)
+    start = np.zeros(n, int) if shared_start else rng.integers(0, 200, n)
+    u = np.repeat(np.arange(n), m)
+    age = np.tile(np.arange(m), n)
+    return pd.DataFrame({"unit": u, "time": start[u] + age,
+                         "age": age + rng.normal(0, 0.5, len(u))})
+
+
+def test_placebo_separates_own_change_from_shared_change(fast_scorer):
+    def run(shared):
+        r = audit(Panel(ageing_table(shared), "unit", "time"), ["age"],
+                  (1, 10), which=("timing", "placebo"), repeats=2,
+                  n_pairs=3000, scorer=fast_scorer)
+        return r.timing["auc"][0], r.placebo["auc"][0]
+    timing, placebo = run(shared=False)
+    assert timing > 0.58 and placebo < 0.56
+    timing, placebo = run(shared=True)
+    assert timing > 0.58 and placebo > 0.58

@@ -44,7 +44,7 @@ What runs depends on what you give:
 
 | You give | You get |
 |---|---|
-| `unit` and `time` | the identity and timing audits, the individual-or-type test, the per-column ranking |
+| `unit` and `time` | the identity and timing audits, the timing placebo, the individual-or-type test, the per-column ranking |
 | plus `event` | the overlap check, the chronological control, the clock baseline |
 | plus `horizon` | those three run as a forecast: "does the event come within this long after the row?" |
 
@@ -82,6 +82,12 @@ two rows of a pair is chosen from the data and stated in the report.
 Units are split into training and held-out sides before any pair is
 drawn, so the AUC is measured on units the classifier never saw. The
 interval comes from resampling held-out units, pooled over repeats.
+
+**Timing placebo.** The timing audit again, with the later row taken
+from a different unit observed at that time. If this score is near 0.5,
+the timing signal is each unit's own history. If it is near the timing
+audit's score, the signal is change shared by all units, such as
+calendar drift or a change in how every unit is recorded.
 
 **Individual or type.** The identity audit is reported twice. With
 `random` impostors the different unit is any other unit, so a high

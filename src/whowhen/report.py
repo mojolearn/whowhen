@@ -60,6 +60,14 @@ class Report:
                 if t is not None:
                     out += ["", f"{kind} audit (AUC; 0.5 = no signal)",
                             t.round(3).to_string(index=False)]
+            t = self.audit.placebo
+            if t is not None:
+                out += ["", "timing placebo (the later row is taken from a "
+                        "different unit)",
+                        t.round(3).to_string(index=False),
+                        "near 0.5: the timing signal is each unit's own. "
+                        "near the timing audit: it is change shared by all "
+                        "units."]
         if self.columns is not None:
             for kind, t in self.columns.items():
                 out += ["", f"columns by {kind} signal",
@@ -137,6 +145,7 @@ def report(df: pd.DataFrame, unit: str, time: str,
     steps = {
         "audit": lambda: audit(panel, features, offset, scorer=sc,
                                n_pairs=n_pairs,
+                               which=("identity", "timing", "placebo"),
                                impostors=("random", "nearest"), **common),
         "columns": lambda: rank_columns(panel, flat, offset, scorer=sc,
                                         n_pairs=n_pairs, **common),
