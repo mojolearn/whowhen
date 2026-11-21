@@ -1,11 +1,11 @@
 """Command line.
 
-    whowhen report rows.parquet --unit patient_id --time hour --event sepsis
+    whowhen rows.parquet --unit patient_id --time hour --event sepsis
     whowhen demo
 
 To use a report in a script, name what counts as a failure:
 
-    whowhen report rows.parquet --unit u --time t --event e \\
+    whowhen rows.parquet --unit u --time t --event e \\
         --fail-if "overlap_gap > 0.02" --fail-if "clock_gain < 0.01"
 
 The command then exits with 1 if any condition holds, and with 2 if a
@@ -59,8 +59,15 @@ def check(conditions: list[str], numbers: dict) -> tuple[list[str], list[str]]:
 def main() -> None:  # pragma: no cover
     ap = argparse.ArgumentParser(prog="whowhen", description=__doc__,
                                  formatter_class=argparse.RawTextHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("report", help="check a table")
+    argv = sys.argv[1:]
+    if argv and argv[0] == "demo":
+        demo = argparse.ArgumentParser(prog="whowhen demo",
+                                       description="synthetic table with known answers")
+        demo.add_argument("--repeats", type=int, default=3)
+        args = demo.parse_args(argv[1:])
+        from .demo import run_demo
+        raise SystemExit(0 if run_demo(args.repeats) else 1)
+    r = ap
     r.add_argument("table", type=Path, help="parquet or CSV")
     r.add_argument("--unit", required=True)
     r.add_argument("--time", required=True)
@@ -73,12 +80,7 @@ def main() -> None:  # pragma: no cover
                    metavar='"NAME > NUMBER"',
                    help="exit with 1 if this holds; may be given more "
                         "than once. NAME is one of: " + ", ".join(NAMES))
-    d = sub.add_parser("demo", help="synthetic table with known answers")
-    d.add_argument("--repeats", type=int, default=3)
-    args = ap.parse_args()
-    if args.cmd == "demo":
-        from .demo import run_demo
-        raise SystemExit(0 if run_demo(args.repeats) else 1)
+    args = ap.parse_args(argv)
     for text in args.fail_if:        # reject a bad condition before the run
         try:
             parse_condition(text)

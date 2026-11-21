@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- Run `whowhen TABLE --unit ... --time ...` directly. This replaces the `whowhen report ...` command. `whowhen demo` and the Python interface are unchanged.
+
 ## 0.1.2
 
 - The report records the whowhen version and DOI, and the classifier's DOI beside its version.

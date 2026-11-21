@@ -20,6 +20,14 @@ pip install whowhen
 
 ## Use
 
+From the terminal, give a CSV file and the names of its columns:
+
+```bash
+whowhen rows.csv --unit patient_id --time hour --event sepsis
+```
+
+In Python, pass a pandas DataFrame (your data table):
+
 ```python
 import pandas as pd
 import whowhen as ww
@@ -28,7 +36,7 @@ df = pd.read_parquet("stays.parquet")
 print(ww.report(df, unit="patient_id", time="hour", event="sepsis"))
 ```
 
-That is the whole interface.
+Both interfaces run the same checks.
 
 | Setting | Required | Default | What it is |
 |---|---|---|---|
@@ -187,15 +195,18 @@ environment variable to use fewer.
 ## Command line
 
 ```
-whowhen report rows.parquet --unit patient_id --time hour --event sepsis
+whowhen rows.parquet --unit patient_id --time hour --event sepsis
 whowhen demo
 ```
+
+CSV and Parquet files are supported. Use `whowhen --help` for report
+options or `whowhen demo --help` for demo options.
 
 To use a report in a script or a scheduled job, say what counts as a
 failure:
 
 ```
-whowhen report rows.parquet --unit patient_id --time hour --event sepsis \
+whowhen rows.parquet --unit patient_id --time hour --event sepsis \
     --fail-if "overlap_gap > 0.02" --fail-if "clock_gain < 0.01"
 ```
 
