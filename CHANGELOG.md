@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.2.1
 
 - `time` can be left out, for tables whose rows are not ordered in time: `ww.report(df, unit="patient_id")` or `whowhen TABLE --unit patient_id`. The identity audit and its per-column ranking run on pairs that are not matched on time, and the overlap check runs when an event column is given. The timing audit, its placebo, the audits by gap, the chronological control, the time-cut split and the clock baseline are listed as not run. Calls that give `time` are unchanged.
 
