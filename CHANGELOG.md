@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0
 
 - Re-identification controls are matched on everything the table records about a unit other than who it is: the same time (as before), the same event status, and the same value in every group column (a column with one value per unit and on average at least 10 units per value, such as site, batch or scanner, found automatically). A site, batch or calendar effect shared by a unit's rows no longer passes for identity, and the report lists what controls were matched on. This replaces nearest-neighbour controls, which matched on column averages and so also removed each unit's own level; `reidentification_nearest_neighbour` is gone.
 - Units with an event are kept in the re-identification test, matched to controls that also had the event. They were left out before, which with a per-unit label dropped most units. The time-order test and its placebo still leave them out.

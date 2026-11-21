@@ -10,7 +10,7 @@ Both are measured as the AUC of a classifier on pairs built so that
 0.5 means no signal. See the README for what the numbers do and do not
 mean.
 """
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 __doi__ = "10.5281/zenodo.24406266"   # every version of whowhen
 
 from .report import Report, report  # noqa: E402

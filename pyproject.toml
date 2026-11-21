@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whowhen"
-version = "0.2.1"
+version = "0.3.0"
 description = "Audit panel data for identity and timing signals a model can exploit without predicting anything"
 readme = "README.md"
 license = {text = "Apache-2.0"}
