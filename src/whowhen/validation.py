@@ -4,12 +4,12 @@ the test units inflate the score?
 Each replicate scores the same test rows twice, with the same number of
 training rows of each class:
 
-* disjoint: training holds no row of any test unit;
-* overlap: some training rows are swapped for other rows of the test
-  units (rows that are not themselves test rows).
+* subject-wise: training holds no row of any test unit;
+* record-wise: some training rows are swapped for other rows of the
+  test units (rows that are not themselves test rows).
 
 The two fits differ only in whether training shares units with the test
-rows. The gap in AUC (overlap minus disjoint), over many repeats with
+rows. The gap in AUC (record-wise minus subject-wise), over many repeats with
 fresh unit splits, is the result. A gap whose interval excludes zero
 means this classifier, on these columns, scores higher when training
 shares units with the test rows. It shows the evaluation is sensitive
@@ -31,7 +31,7 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from ._stats import auc
-from .audit import cores, n_workers, pick_seed
+from .pair_tests import cores, n_workers, pick_seed
 from .pairs import unit_groups
 from .panel import Panel
 from .scorers import Scorer, fit_score, resolve
@@ -39,7 +39,7 @@ from .scorers import Scorer, fit_score, resolve
 TIME_SPLITS = (None, "calendar", "chronological")
 
 
-def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
+def split_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
                   test_units: np.ndarray, time_split: str | None = None,
                   settle: float = 0.0):
     """(test, leak, base) boolean row masks for one repeat.
@@ -124,12 +124,12 @@ def matched_training(y: np.ndarray, leak: np.ndarray, base: np.ndarray,
                      rng: np.random.Generator):
     """Two training index sets with identical per-class counts.
 
-    disjoint = every base row. overlap = leak rows plus base rows drawn
+    subject-wise = every base row. record-wise = leak rows plus base rows drawn
     to the same per-class count (leak rows are subsampled if there are
     more of them than base rows of that class). The test set is shared,
     so the two fits see the same test rows and the same amount of
     training data, and differ only in the leak rows.
-    Returns (overlap, disjoint, leak_share per class).
+    Returns (record-wise, subject-wise, leak_share per class).
     """
     ov, dj, share = [], [], []
     for c in (0, 1):
@@ -167,7 +167,7 @@ def _replicate(X, y, unit, time, b: int, seed: int, groups, random: bool,
     absent; {"no_leak": True} if no other row of a test unit may be
     trained on."""
     rng = np.random.default_rng([seed, b])
-    te, leak, base = overlap_masks(unit, time, rng,
+    te, leak, base = split_masks(unit, time, rng,
                                    held_out(groups, b, random, rng),
                                    time_split, settle)
     if not leak.any():
@@ -187,10 +187,10 @@ def _replicate(X, y, unit, time, b: int, seed: int, groups, random: bool,
 
 
 @dataclass
-class OverlapResult:
+class ValidationResult:
     """What record-wise vs subject-wise validation found.
 
-    gap : mean over repeats of overlap AUC minus disjoint AUC.
+    gap : mean over repeats of record-wise AUC minus subject-wise AUC.
     lo, hi : 2.5 and 97.5 percentiles of the per-replicate gap.
     auc_record_wise, auc_subject_wise : mean AUC of each arm.
     repeats : repeats that produced a gap.
@@ -242,11 +242,11 @@ def follow_up_note(info: dict) -> str:
 
 
 
-def overlap_check(panel: Panel, features, *, model=None,
+def record_wise_validation(panel: Panel, features, *, model=None,
                   repeats: int = 3,
                   time_split: str | None = None,
                   horizon=None, random: bool = False, seed: int | None = None,
-                  n_jobs: int | None = None) -> OverlapResult:
+                  n_jobs: int | None = None) -> ValidationResult:
     """Measure how much sharing units between training and test inflates AUC.
 
     Parameters
@@ -271,7 +271,7 @@ def overlap_check(panel: Panel, features, *, model=None,
     time_split : None; "calendar" to take test rows from after a cut
         time and training rows from before it, in both arms; or
         "chronological" to test the later half of each test unit's rows
-        and let the overlap arm train on the earlier half, which asks
+        and let the record-wise arm train on the earlier half, which asks
         whether a unit's own past helps predict its own future.
     n_jobs : parallel workers over repeats; every core by default, or
         the WHOWHEN_JOBS environment variable.
@@ -329,7 +329,7 @@ def overlap_check(panel: Panel, features, *, model=None,
             "labels_settled_by_cut": bool(settle and time_split),
             "repeats_requested": repeats, "seed": seed,
             "workers": workers}
-    return OverlapResult(gap=float(per["gap"].mean()), lo=float(lo),
+    return ValidationResult(gap=float(per["gap"].mean()), lo=float(lo),
                          hi=float(hi),
                          auc_record_wise=float(per["auc_record_wise"].mean()),
                          auc_subject_wise=float(per["auc_subject_wise"].mean()),

@@ -4,10 +4,10 @@ import pandas as pd
 import pytest
 
 import whowhen as ww
-from whowhen.audit import audit
-from whowhen.clock import clock_baseline
+from whowhen.pair_tests import pair_tests
+from whowhen.time_only import time_only_baseline
 from whowhen.panel import Panel
-from whowhen.overlap import forecast_labels, overlap_masks
+from whowhen.validation import forecast_labels, split_masks
 
 
 def event_table(n_units=300, n_t=40, seed=0, clock_driven=True):
@@ -46,7 +46,7 @@ def test_chronological_masks():
     unit = np.repeat(np.arange(50), 10)
     time = np.tile(np.arange(10.0), 50)
     rng = np.random.default_rng(0)
-    te, leak, base = overlap_masks(unit, time, rng, rng.random(50) < 0.2,
+    te, leak, base = split_masks(unit, time, rng, rng.random(50) < 0.2,
                                    time_split="chronological")
     assert te.any() and not (te & leak).any() and not (te & base).any()
     assert set(unit[te]) == set(unit[leak])
@@ -56,7 +56,7 @@ def test_chronological_masks():
 
 def test_time_only_baseline_sees_elapsed_time(fast_scorer):
     p = Panel(event_table(), "unit", "time", event="event")
-    r = clock_baseline(p, ["level", "noise"], horizon=12, model=fast_scorer,
+    r = time_only_baseline(p, ["level", "noise"], horizon=12, model=fast_scorer,
                        repeats=6)
     t = r.table.set_index("input")["auc"]
     assert t["time"] > 0.65
@@ -152,7 +152,7 @@ def ageing_table(shared_start, n=300, m=30, seed=0):
 
 def test_placebo_separates_own_change_from_shared_change(fast_scorer):
     def run(shared):
-        r = audit(Panel(ageing_table(shared), "unit", "time"), ["age"],
+        r = pair_tests(Panel(ageing_table(shared), "unit", "time"), ["age"],
                   (1, 10), which=("time_order", "placebo"), repeats=2,
                   n_pairs=3000, scorer=fast_scorer)
         return r.time_order["auc"][0], r.placebo["auc"][0]
@@ -220,8 +220,8 @@ def test_time_splits_train_only_on_settled_labels(split):
     time = np.tile(np.arange(20.0), 60)
     rng = np.random.default_rng(0)
     tu = rng.random(60) < 0.3
-    te, leak, base = overlap_masks(unit, time, rng, tu, split, settle=4.0)
-    loose = overlap_masks(unit, time, np.random.default_rng(0), tu, split)
+    te, leak, base = split_masks(unit, time, rng, tu, split, settle=4.0)
+    loose = split_masks(unit, time, np.random.default_rng(0), tu, split)
     assert te.tolist() == loose[0].tolist()          # the test rows stay
     assert leak.any() and leak.sum() < loose[1].sum()
     first_test = np.full(60, np.inf)
@@ -255,7 +255,7 @@ def test_unsettled_labels_would_inflate_the_temporal_split_gap():
     answer for the test rows of the same unit. Planted here: units are
     recognisable and the columns say nothing else about the event."""
     from sklearn.ensemble import HistGradientBoostingClassifier
-    from whowhen.overlap import _replicate
+    from whowhen.validation import _replicate
     from whowhen.pairs import unit_groups
     from whowhen.scorers import resolve
     cols = ["s0", "s1", "s2", "s3"]

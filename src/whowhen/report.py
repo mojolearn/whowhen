@@ -13,10 +13,10 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .audit import AuditResult, _feature_sets, audit, pick_seed
-from .clock import ClockResult, clock_baseline
-from .columns import rank_columns
-from .overlap import OverlapResult, overlap_check
+from .pair_tests import PairTestResult, _feature_sets, pair_tests, pick_seed
+from .time_only import TimeOnlyResult, time_only_baseline
+from .importance import column_importance
+from .validation import ValidationResult, record_wise_validation
 from .panel import Panel
 from .scorers import resolve
 
@@ -37,13 +37,13 @@ class Report:
     not given as named sets)."""
     scorer: dict
     info: dict
-    pair_tests: AuditResult | None = None
+    pair_tests: PairTestResult | None = None
     by_gap: pd.DataFrame | None = None
     importance: dict | None = None
-    record_wise: dict[str, OverlapResult] | None = None
-    temporal_split: dict[str, OverlapResult] | None = None
-    out_of_time: dict[str, OverlapResult] | None = None
-    time_only: dict[str, ClockResult] | None = None
+    record_wise: dict[str, ValidationResult] | None = None
+    temporal_split: dict[str, ValidationResult] | None = None
+    out_of_time: dict[str, ValidationResult] | None = None
+    time_only: dict[str, TimeOnlyResult] | None = None
     skipped: dict = field(default_factory=dict)
 
     def headline(self) -> dict:
@@ -239,7 +239,7 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
         mid = lo + (hi - lo) / 2
         out = []
         for name, (a, b) in (("short", (lo, mid)), ("long", (mid, hi))):
-            r = audit(panel, features, (a, b), scorer=sc, n_pairs=n_pairs,
+            r = pair_tests(panel, features, (a, b), scorer=sc, n_pairs=n_pairs,
                       **common)
             for kind in ("reidentification", "time_order"):
                 t = getattr(r, kind).copy()
@@ -257,18 +257,18 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
 
     steps = {
         "by_gap": gaps,
-        "out_of_time": lambda: per_set(overlap_check, time_split="calendar"),
-        "pair_tests": lambda: audit(panel, features, offset, scorer=sc,
+        "out_of_time": lambda: per_set(record_wise_validation, time_split="calendar"),
+        "pair_tests": lambda: pair_tests(panel, features, offset, scorer=sc,
                                n_pairs=n_pairs,
                                which=(("reidentification", "time_order", "placebo")
                                       if time else ("reidentification",)),
                                **common),
-        "importance": lambda: rank_columns(panel, flat, offset, scorer=sc,
+        "importance": lambda: column_importance(panel, flat, offset, scorer=sc,
                                         n_pairs=n_pairs, **common),
-        "record_wise": lambda: per_set(overlap_check),
-        "temporal_split": lambda: per_set(overlap_check,
+        "record_wise": lambda: per_set(record_wise_validation),
+        "temporal_split": lambda: per_set(record_wise_validation,
                                          time_split="chronological"),
-        "time_only": lambda: per_set(clock_baseline),
+        "time_only": lambda: per_set(time_only_baseline),
     }
     for part in PARTS:
         if part == "importance" and not ranked:

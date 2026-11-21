@@ -1,4 +1,4 @@
-"""Invariants and a planted-signal check for whowhen.overlap.
+"""Invariants and a planted-signal check for whowhen.validation.
 
 1. Both arms score one shared test set, and their training sets hold the
    same number of rows of each class.
@@ -15,7 +15,7 @@ import pytest
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 from whowhen.panel import Panel
-from whowhen.overlap import matched_training, overlap_check, overlap_masks
+from whowhen.validation import matched_training, record_wise_validation, split_masks
 
 FEATS = ["level", "s0", "s1", "s2", "s3"]
 
@@ -51,7 +51,7 @@ def synth(n_units=300, rows=40, seed=0, per_unit_labels=True):
 def test_shared_test_equal_counts_and_disjointness(split):
     f = synth(seed=1).frame(FEATS, keep_event_units=True)
     rng = np.random.default_rng(1)
-    te, leak, base = overlap_masks(f.unit, f.time, rng,
+    te, leak, base = split_masks(f.unit, f.time, rng,
                                    rng.random(f.n_units) < 0.2, split)
     assert te.sum() > 0 and leak.sum() > 0 and base.sum() > 0
     assert not (te & leak).any() and not (te & base).any()
@@ -75,7 +75,7 @@ def test_needs_event_column():
     p = synth()
     bare = Panel(p.df.drop(columns="event"), unit="unit", time="time")
     with pytest.raises(ValueError, match="event column"):
-        overlap_check(bare, FEATS, model=HistGradientBoostingClassifier())
+        record_wise_validation(bare, FEATS, model=HistGradientBoostingClassifier())
 
 
 KW = dict(model=HistGradientBoostingClassifier(max_iter=40), repeats=20,
@@ -83,7 +83,7 @@ KW = dict(model=HistGradientBoostingClassifier(max_iter=40), repeats=20,
 
 
 def test_memorisable_units_inflate_score():
-    r = overlap_check(synth(seed=2), FEATS, **KW)
+    r = record_wise_validation(synth(seed=2), FEATS, **KW)
     print(r)
     assert r.repeats == 20 and len(r.per_replicate) == 20
     assert r.scorer["name"] == "sklearn.HistGradientBoostingClassifier"
@@ -95,12 +95,12 @@ def test_memorisable_units_inflate_score():
 
 
 def test_independent_labels_no_inflation():
-    r = overlap_check(synth(seed=3, per_unit_labels=False), FEATS, **KW)
+    r = record_wise_validation(synth(seed=3, per_unit_labels=False), FEATS, **KW)
     print(r)
     assert r.lo <= 0 <= r.hi, r
 
 
 def test_calendar_split_runs():
-    r = overlap_check(synth(seed=4), FEATS, time_split="calendar",
+    r = record_wise_validation(synth(seed=4), FEATS, time_split="calendar",
                       **{**KW, "repeats": 4})
     assert r.info["time_split"] == "calendar" and r.repeats == 4

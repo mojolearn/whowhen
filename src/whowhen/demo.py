@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .audit import AuditResult, audit
+from .pair_tests import PairTestResult, pair_tests
 from .panel import Panel
 
 SIG = [f"sig{i}" for i in range(3)]
@@ -58,7 +58,7 @@ def synthesize(n_units: int = 700, n_days: int = 120,
     return df
 
 
-def verdicts(result: AuditResult) -> list[tuple]:
+def verdicts(result: PairTestResult) -> list[tuple]:
     """(test, feature set, AUC, half-width, expected signal, ok).
 
     A no-signal set passes when 0.5 lies within the interval's
@@ -81,7 +81,7 @@ def verdicts(result: AuditResult) -> list[tuple]:
 
 def run_demo(repeats: int = 3, quiet: bool = False, _scorer=None) -> bool:
     panel = Panel(synthesize(), unit="unit", time="time")
-    result = audit(panel, SETS, offset=("30D", "90D"), scorer=_scorer,
+    result = pair_tests(panel, SETS, offset=("30D", "90D"), scorer=_scorer,
                    n_pairs=3000, max_pairs_per_unit=4, repeats=repeats,
                    bootstrap=500)
     rows = verdicts(result)

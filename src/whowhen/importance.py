@@ -7,8 +7,8 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from ._stats import auc
-from .audit import (Draw, cores as n_cores, draw, n_workers, pair_gap,
-                    pick_seed, test_frames)
+from .pair_tests import (Draw, cores as n_cores, draw, n_workers, pair_gap,
+                    pick_seed, frames_for)
 from .panel import Frame, Panel  # noqa: F401
 from .scorers import Scorer, resolve
 
@@ -19,7 +19,7 @@ def _fit_auc(frame: Frame, d: Draw, cols: tuple, scorer: Scorer, seed: int,
     return auc(d.y[~d.tr], d.fit(frame, list(cols), scorer, seed, threads))
 
 
-def rank_columns(panel: Panel, columns, offset=None, *, scorer=None,
+def column_importance(panel: Panel, columns, offset=None, *, scorer=None,
                  which=None,
                  n_pairs: int = 20000, max_pairs_per_unit: int = 20,
                  repeats: int = 3, random: bool = False,
@@ -29,7 +29,7 @@ def rank_columns(panel: Panel, columns, offset=None, *, scorer=None,
 
     For each test in ``which`` and each seed, the pairs and the unit
     split are drawn once and shared by every fit, so differences between
-    columns are not pair noise. The draws are the ones audit() makes
+    columns are not pair noise. The draws are the ones pair_tests() makes
     for the same seed.
 
     Each column costs two fits per test and repeat (alone, and all
@@ -48,19 +48,19 @@ def rank_columns(panel: Panel, columns, offset=None, *, scorer=None,
 
     The scorer description is in each table's ``attrs["scorer"]``. No
     bootstrap is run: this is a ranking, not an interval estimate; use
-    audit() for intervals on any set this points to.
+    pair_tests() for intervals on any set this points to.
 
-    Parameters are as in audit(). n_jobs : parallel workers over
+    Parameters are as in pair_tests(). n_jobs : parallel workers over
     (test, seed, column set) fits; every core by default, or the
     WHOWHEN_JOBS environment variable.
     """
     columns = list(dict.fromkeys(columns))
     seed = pick_seed(seed, random)
     if not columns:
-        raise ValueError("rank_columns needs at least one column")
+        raise ValueError("column_importance needs at least one column")
     which, lo, hi = pair_gap(panel, offset, which)
     sc = resolve(scorer)
-    frames = test_frames(panel, columns, which, repeats, random)
+    frames = frames_for(panel, columns, which, repeats, random)
     cores = n_cores()
 
     # Phase 1: one draw per (test, seed), in parallel.

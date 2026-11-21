@@ -8,7 +8,7 @@ authors:
     orcid: "https://orcid.org/0009-0000-9877-3623"
 license: Apache-2.0
 repository-code: "https://github.com/mojolearn/whowhen"
-version: 0.3.0
+version: 0.3.1
 doi: 10.5281/zenodo.24406266
 preferred-citation:
   type: article

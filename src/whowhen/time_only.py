@@ -18,8 +18,8 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from ._stats import auc
-from .audit import cores, n_workers, pick_seed
-from .overlap import follow_up_note, forecast_labels, held_out
+from .pair_tests import cores, n_workers, pick_seed
+from .validation import follow_up_note, forecast_labels, held_out
 from .pairs import unit_groups
 from .panel import Panel
 from .scorers import Scorer, fit_score, resolve
@@ -37,7 +37,7 @@ def _replicate(sets: dict, y, unit, b: int, seed: int, groups, random: bool,
 
 
 @dataclass
-class ClockResult:
+class TimeOnlyResult:
     """What the time-only baseline found.
 
     table : one row per input, with the mean held-out AUC and the 2.5
@@ -69,13 +69,13 @@ class ClockResult:
                 + follow_up_note(self.info))
 
 
-def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
+def time_only_baseline(panel: Panel, features, *, horizon=None, model=None,
                    repeats: int = 3,
                    random: bool = False, seed: int | None = None,
-                   n_jobs: int | None = None) -> ClockResult:
+                   n_jobs: int | None = None) -> TimeOnlyResult:
     """Score the event task from elapsed time alone, and beside the features.
 
-    Parameters are as in ``overlap_check``. The clock is the time since
+    Parameters are as in ``record_wise_validation``. The clock is the time since
     the unit's first row. ``features`` should not themselves include a
     clock column if the comparison is to mean anything.
     """
@@ -127,7 +127,7 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
             "horizon": None if horizon is None else str(horizon),
             "rows_without_follow_up": unfollowed,
             "repeats_requested": repeats, "seed": seed}
-    return ClockResult(table=table, gain=float(g.mean()),
+    return TimeOnlyResult(table=table, gain=float(g.mean()),
                        gain_lo=float(np.percentile(g, 2.5)),
                        gain_hi=float(np.percentile(g, 97.5)),
                        repeats=len(per), scorer=sc.describe(), info=info)

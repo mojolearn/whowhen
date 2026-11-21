@@ -4,8 +4,8 @@ import pytest
 
 from whowhen.panel import Panel
 from whowhen import demo
-from whowhen.audit import draw
-from whowhen.columns import rank_columns
+from whowhen.pair_tests import draw
+from whowhen.importance import column_importance
 
 KW = dict(n_pairs=1500, max_pairs_per_unit=4, repeats=2, n_jobs=2)
 COLS = demo.CLOCKS + demo.SIG + demo.NOISE
@@ -18,7 +18,7 @@ def panel():
 
 
 def test_planted_columns_rank_first(panel, fast_scorer):
-    r = rank_columns(panel, COLS, offset=("30D", "70D"), scorer=fast_scorer,
+    r = column_importance(panel, COLS, offset=("30D", "70D"), scorer=fast_scorer,
                      **KW)
     ident, timing = r["reidentification"], r["time_order"]
     for t in (ident, timing):
@@ -49,7 +49,7 @@ def test_draw_is_shared_and_matches_audit_seed(panel):
 
 
 def test_single_column_and_bad_test_name(panel, fast_scorer):
-    r = rank_columns(panel, ["sig0"], offset=("30D", "70D"),
+    r = column_importance(panel, ["sig0"], offset=("30D", "70D"),
                      which="reidentification", scorer=fast_scorer, **KW)
     t = r["reidentification"]
     assert list(r) == ["reidentification"]
@@ -57,5 +57,5 @@ def test_single_column_and_bad_test_name(panel, fast_scorer):
     assert t.loc[0, "drop_column_importance"] == pytest.approx(
         t.loc[0, "all_columns_auc"] - 0.5)
     with pytest.raises(ValueError):
-        rank_columns(panel, ["sig0"], offset=("30D", "70D"), which="when",
+        column_importance(panel, ["sig0"], offset=("30D", "70D"), which="when",
                      scorer=fast_scorer, **KW)

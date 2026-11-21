@@ -1,9 +1,9 @@
-"""Each audit reads its own planted signal and nothing else."""
+"""Each pair test reads its own planted signal and nothing else."""
 import numpy as np
 import pandas as pd
 import pytest
 
-from whowhen.audit import audit
+from whowhen.pair_tests import pair_tests
 from whowhen.panel import Panel
 from whowhen import demo, pairs
 from whowhen._stats import bootstrap_auc
@@ -20,7 +20,7 @@ def panel():
 
 
 def test_each_audit_reads_only_its_own_signal(panel, fast_scorer):
-    r = audit(panel, demo.SETS, offset=("30D", "90D"),
+    r = pair_tests(panel, demo.SETS, offset=("30D", "90D"),
                  scorer=fast_scorer, **KW)
     assert all(ok for *_, ok in demo.verdicts(r)), r
     assert r.scorer["name"] == "sklearn.HistGradientBoostingClassifier"
@@ -28,7 +28,7 @@ def test_each_audit_reads_only_its_own_signal(panel, fast_scorer):
 
 
 def test_default_scorer_is_recorded(panel, default_scorer_runs):
-    r = audit(panel, {"signature": demo.SIG, "noise": demo.NOISE},
+    r = pair_tests(panel, {"signature": demo.SIG, "noise": demo.NOISE},
                  offset=("30D", "90D"), which="reidentification", n_pairs=1500,
                  max_pairs_per_unit=4, repeats=1, bootstrap=100, n_jobs=1)
     assert r.scorer == resolve(None).describe()
@@ -130,7 +130,7 @@ def test_carry_forward_raises_identity(fast_scorer):
     raw[rng.random(len(df)) < 0.9] = np.nan
     df["raw"] = raw
     df["locf"] = df.groupby("unit")["raw"].ffill()
-    r = audit(Panel(df, "unit", "time"), {"raw": ["raw"], "locf": ["locf"]},
+    r = pair_tests(Panel(df, "unit", "time"), {"raw": ["raw"], "locf": ["locf"]},
               offset=(1, 6), which="reidentification", scorer=fast_scorer, **KW)
     t = r.reidentification.set_index("features")["auc"]
     assert t["locf"] > t["raw"] + 0.05
@@ -151,7 +151,7 @@ def test_recorded_types_are_matched_away_and_individuals_kept(fast_scorer):
     df["self"] = rng.normal(0, 1, n_units)[u] + rng.normal(0, .3, n)
     p = Panel(df, "unit", "time")
     types = [f"type{j}" for j in range(3)]
-    r = audit(p, {"types": types, "types_and_self": types + ["self"]},
+    r = pair_tests(p, {"types": types, "types_and_self": types + ["self"]},
               offset=(5, 30), which="reidentification", scorer=fast_scorer,
               **KW)
     assert r.info["matched_on"] == ["time", "kind"]
@@ -177,8 +177,8 @@ def test_same_call_gives_the_same_numbers(panel, fast_scorer):
     kw = dict(offset=("30D", "90D"), which="reidentification", n_pairs=600,
               max_pairs_per_unit=2, repeats=2, bootstrap=50, n_jobs=2,
               scorer=fast_scorer)
-    a = audit(panel, demo.SIG, **kw).reidentification
-    b = audit(panel, demo.SIG, **kw).reidentification
+    a = pair_tests(panel, demo.SIG, **kw).reidentification
+    b = pair_tests(panel, demo.SIG, **kw).reidentification
     assert a.equals(b)
 
 

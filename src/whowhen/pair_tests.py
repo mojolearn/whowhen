@@ -67,7 +67,7 @@ class Draw:
 def draw(frame: Frame, kind: str, k: int, seed: int, lo: float,
          hi: float, n_pairs: int, max_per_unit: int) -> Draw:
     """The pairs and unit split of seed ``k``; deterministic in
-    (seed, k), so audit() and rank_columns() draw the same pairs."""
+    (seed, k), so pair_tests() and column_importance() draw the same pairs."""
     rng = np.random.default_rng(seed + k)
     train = P.split_units(frame, k, frame.repeats,
                           rng if frame.random else None)
@@ -125,7 +125,7 @@ def _one_seed(frame: Frame, kind: str, k: int, seed: int,
 
 
 @dataclass
-class AuditResult:
+class PairTestResult:
     """What the pair tests found.
 
     reidentification, time_order, placebo : one row per feature set, with the mean
@@ -188,7 +188,7 @@ def _feature_sets(features) -> dict:
     return sets
 
 
-def test_frames(panel: Panel, columns: list[str], which, repeats: int,
+def frames_for(panel: Panel, columns: list[str], which, repeats: int,
                 random: bool) -> dict:
     """The rows each pair test draws from. Re-identification uses every
     unit, with each unit's matching group; time order and its placebo
@@ -233,13 +233,13 @@ def pair_gap(panel: Panel, offset, which) -> tuple:
     return which, lo, hi
 
 
-def audit(panel: Panel, features, offset=None, *, scorer=None,
+def pair_tests(panel: Panel, features, offset=None, *, scorer=None,
           which=None,
           n_pairs: int = 20000,
           max_pairs_per_unit: int = 20, repeats: int = 3,
           bootstrap: int = 2000, random: bool = False,
           seed: int | None = None,
-          n_jobs: int | None = None) -> AuditResult:
+          n_jobs: int | None = None) -> PairTestResult:
     """Re-identification, time-order and placebo tests on a panel.
 
     Parameters
@@ -275,7 +275,7 @@ def audit(panel: Panel, features, offset=None, *, scorer=None,
     seed = pick_seed(seed, random)
     sc = resolve(scorer)
     columns = list(dict.fromkeys(c for v in sets.values() for c in v))
-    frames = test_frames(panel, columns, which, repeats, random)
+    frames = frames_for(panel, columns, which, repeats, random)
     f0 = next(iter(frames.values()))
     col_sets = {name: f0.cols(v) for name, v in sets.items()}
     tasks = [(kind, k) for kind in which for k in range(repeats)]
@@ -299,5 +299,5 @@ def audit(panel: Panel, features, offset=None, *, scorer=None,
                        else [str(offset[0]), str(offset[1])]),
             "repeats": repeats, "bootstrap": bootstrap, "seed": seed, "random": random,
             "feature_sets": sets, "workers": workers}
-    return AuditResult(scorer=sc.describe(), info=info,
+    return PairTestResult(scorer=sc.describe(), info=info,
                        **{kind: _table(runs, kind) for kind in which})
