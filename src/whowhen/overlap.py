@@ -10,8 +10,16 @@ training rows of each class:
 The two fits differ only in whether training shares units with the test
 rows. The gap in AUC (overlap minus disjoint), over many repeats with
 fresh unit splits, is the result. A gap whose interval excludes zero
-means a model evaluated on a row-random split would look better than it
-will on new units.
+means this classifier, on these columns, scores higher when training
+shares units with the test rows. It shows the evaluation is sensitive
+to unit overlap; it does not measure what another model gains from it.
+
+With a forecast horizon, two rules keep labels honest. A row of a unit
+with no event is used only if the unit was still observed one horizon
+later, since otherwise "no event within the horizon" was never seen.
+And under a time split, a training row from before the cut is used
+only if its horizon has passed by the cut, since otherwise its label
+was not yet known at the time of the prediction.
 """
 from __future__ import annotations
 
@@ -31,7 +39,8 @@ TIME_SPLITS = (None, "calendar", "chronological")
 
 
 def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
-                  test_units: np.ndarray, time_split: str | None = None):
+                  test_units: np.ndarray, time_split: str | None = None,
+                  settle: float = 0.0):
     """(test, leak, base) boolean row masks for one repeat.
 
     ``test_units`` flags the held-out units. Without a time split, test
@@ -42,6 +51,12 @@ def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
     or before it. Base rows are rows of units that are
     not test units. Leak and base never contain a test row; base never
     contains a row of a test unit.
+
+    ``settle`` is how long after a row its label becomes known: the
+    forecast horizon, or 0 when the label is the row's own flag. Under
+    a time split, a row from before a cut is trained on only if its
+    label is known by that cut. With "chronological", a unit's cut is
+    the time of the last row in its earlier half.
     """
     tu = test_units[unit]
     if time_split is None:
@@ -49,7 +64,7 @@ def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
         return tu & half, tu & ~half, ~tu
     if time_split == "calendar":
         cut = float(np.quantile(time, 1.0 - test_units.mean()))
-        early = time <= cut
+        early = time + settle <= cut
         return tu & (time > cut), tu & early, ~tu & early
     if time_split == "chronological":
         # rows are sorted by (unit, time): the later half of each test
@@ -59,18 +74,25 @@ def overlap_masks(unit: np.ndarray, time: np.ndarray, rng: np.random.Generator,
         counts = np.diff(np.r_[starts, n])
         pos = np.arange(n) - np.repeat(starts, counts)
         late = pos >= np.repeat(counts, counts) / 2
-        return tu & late, tu & ~late, ~tu
+        cut = np.full(int(unit.max()) + 1, -np.inf)
+        np.maximum.at(cut, unit[~late], time[~late])
+        settled = time + settle <= cut[unit]
+        return tu & late, tu & ~late & settled, ~tu
     raise ValueError(f"time_split must be one of {TIME_SPLITS}; "
                      f"got {time_split!r}")
 
 
 def forecast_labels(unit: np.ndarray, time: np.ndarray, y: np.ndarray,
                     horizon: float):
-    """(keep, label) for a fixed-horizon task.
+    """(keep, label, rows without follow-up) for a fixed-horizon task.
 
     A unit's event time is the time of its first flagged row. Rows at or
     after it are dropped; a kept row is positive when the event comes
-    within ``horizon`` after it. Units with no event are all negative.
+    within ``horizon`` after it. A row of a unit with no event is
+    negative if the unit was still observed one horizon later, taking
+    the unit's last row as the end of its follow-up. Otherwise the row
+    is dropped: nobody saw whether the event came within the horizon.
+    The third value counts the rows dropped for that reason.
     """
     n_units = int(unit.max()) + 1 if len(unit) else 0
     onset = np.full(n_units, np.inf)
@@ -85,12 +107,16 @@ def forecast_labels(unit: np.ndarray, time: np.ndarray, y: np.ndarray,
             "the event column says whether a unit had the event, not when; "
             "a horizon needs the flag to start on the row where the event "
             "happens")
+    last = np.full(n_units, -np.inf)
+    np.maximum.at(last, unit, time)
     t_on = onset[unit]
-    keep = time < t_on
+    before = time < t_on
+    followed = np.isfinite(t_on) | (time + horizon <= last[unit])
+    keep = before & followed
     label = (keep & (t_on - time <= horizon)).astype(np.int8)
     if not label[keep].any():
         raise ValueError("no row falls within the horizon before an event")
-    return keep, label[keep]
+    return keep, label[keep], int((before & ~followed).sum())
 
 
 def matched_training(y: np.ndarray, leak: np.ndarray, base: np.ndarray,
@@ -134,13 +160,17 @@ def held_out(groups: np.ndarray, b: int, random: bool,
 
 
 def _replicate(X, y, unit, time, b: int, seed: int, groups, random: bool,
-               time_split, scorer: Scorer,
+               time_split, settle: float, scorer: Scorer,
                threads: int) -> dict | None:
-    """One unit split, one matched pair of fits. None if a class is absent."""
+    """One unit split, one matched pair of fits. None if a class is
+    absent; {"no_leak": True} if no other row of a test unit may be
+    trained on."""
     rng = np.random.default_rng([seed, b])
     te, leak, base = overlap_masks(unit, time, rng,
                                    held_out(groups, b, random, rng),
-                                   time_split)
+                                   time_split, settle)
+    if not leak.any():
+        return {"no_leak": True}
     ov, dj, share = matched_training(y, leak, base, rng)
     tei = np.flatnonzero(te)
     if not (_two_classes(y[tei]) and _two_classes(y[dj])):
@@ -197,7 +227,18 @@ class OverlapResult:
                 f"  AUC overlap  {self.auc_overlap:.3f}\n"
                 f"  AUC disjoint {self.auc_disjoint:.3f}\n"
                 f"  gap          {self.gap:+.3f}  "
-                f"[{self.lo:+.3f}, {self.hi:+.3f}]")
+                f"[{self.lo:+.3f}, {self.hi:+.3f}]"
+                + follow_up_note(self.info)
+                + ("\n  training rows from before the cut are used only "
+                   "if their horizon has passed by the cut"
+                   if self.info.get("labels_settled_by_cut") else ""))
+
+
+def follow_up_note(info: dict) -> str:
+    n = info.get("rows_without_follow_up")
+    return (f"\n  {n:,} rows left out: their unit's record ends before "
+            f"the horizon does" if n else "")
+
 
 
 def overlap_check(panel: Panel, features, *, model=None,
@@ -250,26 +291,39 @@ def overlap_check(panel: Panel, features, *, model=None,
         raise ValueError(f"only {frame.n_units} units; the overlap check "
                          f"needs many units")
     X, y, unit, time = frame.X, frame.y, frame.unit, frame.time
+    settle, unfollowed = 0.0, None
     if horizon is not None:
-        keep, y = forecast_labels(unit, time, y, panel.offset(horizon))
+        settle = panel.offset(horizon)
+        keep, y, unfollowed = forecast_labels(unit, time, y, settle)
         X, unit, time = X[keep], unit[keep], time[keep]
     groups = unit_groups(frame, repeats + 1)
     workers = n_workers(n_jobs, repeats)
     threads = max(1, cores() // workers)
     runs = Parallel(n_jobs=workers)(
         delayed(_replicate)(X, y, unit, time, b, seed,
-                            groups, random, time_split, sc, threads)
+                            groups, random, time_split, settle, sc, threads)
         for b in range(repeats))
     runs = [r for r in runs if r is not None]
+    if runs and all("no_leak" in r for r in runs):
+        raise ValueError("no earlier row of a test unit has its label "
+                         "known by the cut; the horizon is too long for "
+                         "this split")
+    runs = [r for r in runs if "no_leak" not in r]
     if not runs:
-        raise ValueError("no replicate had both classes in its test and "
-                         "training rows; the panel has too few events")
+        raise ValueError(
+            "no repeat had both classes in its test rows and in the "
+            "training rows whose labels are known by the cut"
+            if settle and time_split else
+            "no replicate had both classes in its test and "
+            "training rows; the panel has too few events")
     per = pd.DataFrame(runs)
     lo, hi = np.percentile(per["gap"], [2.5, 97.5])
     info = {"features": features, "n_units": frame.n_units,
             "n_rows": int(len(y)), "event_rate": float(y.mean()),
             "random": random, "time_split": time_split,
             "horizon": None if horizon is None else str(horizon),
+            "rows_without_follow_up": unfollowed,
+            "labels_settled_by_cut": bool(settle and time_split),
             "repeats_requested": repeats, "seed": seed,
             "workers": workers}
     return OverlapResult(gap=float(per["gap"].mean()), lo=float(lo),

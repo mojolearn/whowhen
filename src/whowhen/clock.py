@@ -19,7 +19,7 @@ from joblib import Parallel, delayed
 
 from ._stats import auc
 from .audit import cores, n_workers, pick_seed
-from .overlap import forecast_labels, held_out
+from .overlap import follow_up_note, forecast_labels, held_out
 from .pairs import unit_groups
 from .panel import Panel
 from .scorers import Scorer, fit_score, resolve
@@ -65,7 +65,8 @@ class ClockResult:
                 f"out, scorer: {self.scorer['name']})\n"
                 f"{self.table.round(3).to_string(index=False)}\n"
                 f"  features add {self.gain:+.3f} "
-                f"[{self.gain_lo:+.3f}, {self.gain_hi:+.3f}] to the clock")
+                f"[{self.gain_lo:+.3f}, {self.gain_hi:+.3f}] to the clock"
+                + follow_up_note(self.info))
 
 
 def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
@@ -92,8 +93,10 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
     if panel.datetime:
         clock = (clock / 3.6e12).astype(np.float32)      # hours
     clock = clock[:, None]
+    unfollowed = None
     if horizon is not None:
-        keep, y = forecast_labels(unit, time, y, panel.offset(horizon))
+        keep, y, unfollowed = forecast_labels(unit, time, y,
+                                              panel.offset(horizon))
         X, unit, clock = X[keep], unit[keep], clock[keep]
     sets = {"clock": clock, "features": X,
             "features + clock": np.hstack([X, clock])}
@@ -120,6 +123,7 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
     info = {"features": features, "n_units": frame.n_units,
             "n_rows": int(len(y)), "event_rate": float(y.mean()),
             "horizon": None if horizon is None else str(horizon),
+            "rows_without_follow_up": unfollowed,
             "repeats_requested": repeats, "seed": seed}
     return ClockResult(table=table, gain=float(g.mean()),
                        gain_lo=float(np.percentile(g, 2.5)),

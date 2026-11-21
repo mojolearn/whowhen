@@ -63,7 +63,8 @@ reason.
 
 To compare choices made before modeling, such as raw values against a
 carried-forward or imputed version, put both versions in the table and
-name them:
+name them. Every check then runs once per named set, the audits on the
+same pairs and the event checks on the same splits:
 
 ```python
 ww.report(df, unit="patient_id", time="hour",
@@ -120,7 +121,7 @@ how much the full score drops when that column is removed.
 with the same number of training rows per class: once with the test
 units held out of training, once with other rows of those units
 swapped in. The gap between the two scores is how much sharing units
-between training and test is worth on your task.
+between training and test is worth to this classifier on your task.
 
 **Chronological control.** The same check, testing the later half of
 each test unit's rows and letting training see the earlier half: does
@@ -140,7 +141,13 @@ clock is known.
 ## What the numbers do not mean
 
 An audit AUC above 0.5 says the signal is present in the columns. It
-does not say your model uses it; the overlap check tests that.
+does not say your model uses it.
+
+The overlap check does not say so either. It measures what unit overlap
+is worth to whowhen's classifier, on your columns and your outcome,
+under the split it names. A gap there shows the evaluation is sensitive
+to unit overlap. To learn what your own model gains, train it both
+ways.
 
 **An AUC near 0.5 does not certify an evaluation.** It says this
 classifier, on these columns, found nothing. Leakage through the
@@ -154,6 +161,15 @@ not in the table is outside what these checks see.
   values, since the different-unit pair is matched on time;
 - with `horizon`, an event column flagged on the row where the event
   happens, not on every row of the unit.
+
+With `horizon`, a unit's last row is taken as the end of its follow-up.
+A row of a unit with no event counts as "no event within the horizon"
+only if the unit was still observed one horizon later; other such rows
+are left out, and the report says how many. Under the chronological and
+time-cut splits, a row from before the cut is trained on only if its
+horizon has passed by the cut, so no label is used before it could
+have been known. If your table ends a unit's rows before its follow-up
+truly ends, extend the rows or shorten the horizon.
 
 It does not apply to tables with one row per example and no repeated
 unit.
@@ -222,8 +238,9 @@ there are no built-in thresholds.
 | `clock` | AUC of the clock alone |
 | `clock_gain` | what the columns add once the clock is known |
 
-With several named feature sets, an audit's number is the highest
-across them. A high identity AUC is normal for many tables and is not
+With several named feature sets, each number is the one furthest from
+a clean result: the highest AUC, the highest gap, the lowest clock
+gain. A high identity AUC is normal for many tables and is not
 by itself a failure; the gaps say whether it matters for your task.
 
 ## Citing

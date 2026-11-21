@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .audit import AuditResult, audit, pick_seed
+from .audit import AuditResult, _feature_sets, audit, pick_seed
 from .clock import ClockResult, clock_baseline
 from .columns import rank_columns
 from .overlap import OverlapResult, overlap_check
@@ -24,22 +24,26 @@ PARTS = ("audit", "gaps", "columns", "overlap", "chronological", "time_cut",
 @dataclass
 class Report:
     """Results of ``report``. A part that did not run is None and its
-    reason is in ``skipped``."""
+    reason is in ``skipped``. The four checks that need an event column
+    (overlap, chronological, time_cut, clock) hold one result per
+    feature set, keyed by the set's name ("all" when the columns were
+    not given as named sets)."""
     scorer: dict
     info: dict
     audit: AuditResult | None = None
     gaps: pd.DataFrame | None = None
     columns: dict | None = None
-    overlap: OverlapResult | None = None
-    chronological: OverlapResult | None = None
-    time_cut: OverlapResult | None = None
-    clock: ClockResult | None = None
+    overlap: dict[str, OverlapResult] | None = None
+    chronological: dict[str, OverlapResult] | None = None
+    time_cut: dict[str, OverlapResult] | None = None
+    clock: dict[str, ClockResult] | None = None
     skipped: dict = field(default_factory=dict)
 
     def headline(self) -> dict:
         """One number per check, for scripts. With several feature sets
-        an audit's number is the highest across them. A check that did
-        not run has no entry."""
+        each number is the one furthest from a clean result: the highest
+        AUC, the highest gap, and the lowest clock gain. A check that
+        did not run has no entry."""
         h = {}
         if self.audit is not None:
             t = self.audit.identity
@@ -57,12 +61,13 @@ class Report:
                            ("chronological", "chronological_gap"),
                            ("time_cut", "time_cut_gap")):
             r = getattr(self, part)
-            if r is not None:
-                h[name] = float(r.gap)
-        if self.clock is not None:
-            t = self.clock.table.set_index("input")["auc"]
-            h["clock"] = float(t["clock"])
-            h["clock_gain"] = float(self.clock.gain)
+            if r:
+                h[name] = max(float(x.gap) for x in r.values())
+        if self.clock:
+            h["clock"] = max(
+                float(x.table.set_index("input")["auc"]["clock"])
+                for x in self.clock.values())
+            h["clock_gain"] = min(float(x.gain) for x in self.clock.values())
         return h
 
     def to_dict(self) -> dict:
@@ -72,7 +77,8 @@ class Report:
                      "clock"):
             r = getattr(self, part)
             if r is not None:
-                d[part] = r.to_dict()
+                d[part] = (r.to_dict() if part == "audit" else
+                           {k: x.to_dict() for k, x in r.items()})
         if self.gaps is not None:
             d["gaps"] = self.gaps.to_dict(orient="records")
         if self.columns is not None:
@@ -118,8 +124,9 @@ class Report:
                         t.head(10).round(3).to_string(index=False)]
         for part in ("overlap", "chronological", "time_cut", "clock"):
             r = getattr(self, part)
-            if r is not None:
-                out += ["", repr(r)]
+            for name, x in (r or {}).items():
+                out += [""] + ([f"columns: {name}"] if len(r) > 1 else [])
+                out.append(repr(x))
         if self.skipped:
             out += ["", "not run:"]
             out += [f"  {k}: {v}" for k, v in self.skipped.items()]
@@ -142,14 +149,19 @@ def report(df: pd.DataFrame, unit: str, time: str,
         it the overlap check, the chronological control and the clock
         baseline are left out.
     features : optional. The columns to check: a list, or a dict of
-        named lists to audit side by side on the same pairs (for
-        example {"raw": [...], "filled": [...]}, or with and without a
-        clock column). Default: every numeric column other than unit,
-        time and event.
+        named lists to check side by side (for example
+        {"raw": [...], "filled": [...]}, or with and without a clock
+        column). The audits score each named set on the same pairs, and
+        each check that needs an event column runs once per set.
+        Default: every numeric column other than unit, time and event.
     horizon : optional. With it the event checks forecast: "does the
         event come within this long after the row?", in the time
         column's scale (a string such as '12h' for datetimes). The
-        event column must then flag the row where the event happens.
+        event column must then flag the row where the event happens. A
+        unit's last row is taken as the end of its follow-up: a row of a
+        unit with no event is used only if the unit was still observed
+        one horizon later, and a time split trains only on rows whose
+        horizon has passed by the cut.
     repeats : one number, N: every check runs N times. Units fall into
         N + 1 fixed groups and each run holds out a different group: 1
         holds out a half, 2 a third each, 4 (the default) a fifth each.
@@ -172,6 +184,7 @@ def report(df: pd.DataFrame, unit: str, time: str,
             if isinstance(features, dict) else list(features))
     if not flat:
         raise ValueError("there are no columns to check")
+    sets = _feature_sets(features)
     seed = pick_seed(None, random)
     sc = resolve(_scorer)
     from . import __doi__, __version__
@@ -207,20 +220,25 @@ def report(df: pd.DataFrame, unit: str, time: str,
         return pd.concat(out, ignore_index=True).sort_values(
             ["audit", "features"], kind="stable", ignore_index=True)
 
+    def per_set(check, **kw):
+        """One result per named feature set. The sets run one after
+        another: each check already spreads its repeats over every core."""
+        return {name: check(panel, cols, **kw, **event_kw)
+                for name, cols in sets.items()}
+
     steps = {
         "gaps": gaps,
-        "time_cut": lambda: overlap_check(
-            panel, flat, time_split="calendar", **event_kw),
+        "time_cut": lambda: per_set(overlap_check, time_split="calendar"),
         "audit": lambda: audit(panel, features, offset, scorer=sc,
                                n_pairs=n_pairs,
                                which=("identity", "timing", "placebo"),
                                impostors=("random", "nearest"), **common),
         "columns": lambda: rank_columns(panel, flat, offset, scorer=sc,
                                         n_pairs=n_pairs, **common),
-        "overlap": lambda: overlap_check(panel, flat, **event_kw),
-        "chronological": lambda: overlap_check(
-            panel, flat, time_split="chronological", **event_kw),
-        "clock": lambda: clock_baseline(panel, flat, **event_kw),
+        "overlap": lambda: per_set(overlap_check),
+        "chronological": lambda: per_set(overlap_check,
+                                         time_split="chronological"),
+        "clock": lambda: per_set(clock_baseline),
     }
     for part in PARTS:
         if part in ("audit", "gaps", "columns") and offset is None:

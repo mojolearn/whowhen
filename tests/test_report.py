@@ -32,9 +32,12 @@ def test_forecast_labels():
     unit = np.array([0, 0, 0, 0, 1, 1, 1])
     time = np.array([0., 1, 2, 3, 0, 1, 2])
     y = np.array([0, 0, 0, 1, 0, 0, 0])
-    keep, lab = forecast_labels(unit, time, y, 2.0)
-    assert keep.tolist() == [1, 1, 1, 0, 1, 1, 1]
-    assert lab.tolist() == [0, 1, 1, 0, 0, 0]
+    keep, lab, unfollowed = forecast_labels(unit, time, y, 2.0)
+    # unit 1 has no event and is last seen at time 2, so only its row at
+    # time 0 was followed for the whole horizon
+    assert keep.tolist() == [1, 1, 1, 0, 1, 0, 0]
+    assert lab.tolist() == [0, 1, 1, 0]
+    assert unfollowed == 2
     with pytest.raises(ValueError, match="not when"):
         forecast_labels(unit, time, np.array([1, 1, 1, 1, 0, 0, 0]), 2.0)
 
@@ -62,8 +65,9 @@ def test_clock_baseline_sees_the_clock(fast_scorer):
 
 
 def test_report_runs_everything(fast_scorer):
-    r = ww.report(event_table(), unit="unit", time="time", event="event",
-                  horizon=12, repeats=2, n_pairs=1500, _scorer=fast_scorer)
+    r = ww.report(event_table(clock_driven=False), unit="unit", time="time",
+                  event="event", horizon=12, repeats=2, n_pairs=1500,
+                  _scorer=fast_scorer)
     assert r.info["features"] == ["level", "noise"]
     assert r.info["offset"] and not r.skipped, r.skipped
     for part in ("audit", "gaps", "columns", "overlap", "chronological",
@@ -152,8 +156,9 @@ def test_placebo_separates_own_change_from_shared_change(fast_scorer):
 def test_whole_report_is_the_same_every_time(fast_scorer):
     """Every part of the report, run twice, gives identical numbers."""
     def run():
-        return ww.report(event_table(n_units=200), unit="unit", time="time",
-                         event="event", horizon=12, repeats=2, n_pairs=800,
+        return ww.report(event_table(n_units=200, clock_driven=False),
+                         unit="unit", time="time", event="event", horizon=12,
+                         repeats=2, n_pairs=800,
                          _scorer=fast_scorer).to_dict()
     a, b = run(), run()
     assert not a["skipped"], a["skipped"]
@@ -197,3 +202,97 @@ def test_default_scorer_is_named_with_its_version(default_scorer_runs):
     assert sc.params["version"]
     if sc.name.startswith("mojolearn"):
         assert sc.params["doi"].startswith("10.")
+
+
+@pytest.mark.parametrize("split", ["calendar", "chronological"])
+def test_time_splits_train_only_on_settled_labels(split):
+    unit = np.repeat(np.arange(60), 20)
+    time = np.tile(np.arange(20.0), 60)
+    rng = np.random.default_rng(0)
+    tu = rng.random(60) < 0.3
+    te, leak, base = overlap_masks(unit, time, rng, tu, split, settle=4.0)
+    loose = overlap_masks(unit, time, np.random.default_rng(0), tu, split)
+    assert te.tolist() == loose[0].tolist()          # the test rows stay
+    assert leak.any() and leak.sum() < loose[1].sum()
+    first_test = np.full(60, np.inf)
+    np.minimum.at(first_test, unit[te], time[te])
+    # every earlier row of a test unit that is trained on has its label
+    # known before that unit's first test row
+    assert (time[leak] + 4.0 < first_test[unit[leak]]).all()
+    if split == "calendar":
+        assert (time[base] + 4.0 < time[te].min()).all()
+
+
+def recognisable_units(n_units=400, n_t=40, seed=0):
+    """Units a model can recognise from four columns that say nothing
+    about the event. Half the units have an event, early in their
+    record; the rest are observed to the end."""
+    rng = np.random.default_rng(seed)
+    u = np.repeat(np.arange(n_units), n_t)
+    t = np.tile(np.arange(n_t), n_units)
+    onset = np.where(rng.random(n_units) < 0.5,
+                     rng.integers(6, 12, n_units), 10 ** 6)
+    sig = rng.normal(0, 3.0, (n_units, 4))
+    df = pd.DataFrame({"unit": u, "time": t,
+                       "event": (t == onset[u]).astype(int)})
+    for j in range(4):
+        df[f"s{j}"] = sig[u, j] + rng.normal(0, 0.3, len(u))
+    return df[t <= onset[u]]
+
+
+def test_unsettled_labels_would_inflate_the_chronological_gap():
+    """A training row whose horizon runs past the cut carries the
+    answer for the test rows of the same unit. Planted here: units are
+    recognisable and the columns say nothing else about the event."""
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from whowhen.overlap import _replicate
+    from whowhen.pairs import unit_groups
+    from whowhen.scorers import resolve
+    cols = ["s0", "s1", "s2", "s3"]
+    f = Panel(recognisable_units(), "unit", "time", event="event").frame(
+        cols, keep_event_units=True)
+    keep, y, _ = forecast_labels(f.unit, f.time, f.y, 6.0)
+    X, unit, time = f.X[keep], f.unit[keep], f.time[keep]
+    sc = resolve(HistGradientBoostingClassifier(max_iter=80))
+    groups = unit_groups(f, 5)
+
+    def gap(settle):
+        runs = [_replicate(X, y, unit, time, b, 0, groups, False,
+                           "chronological", settle, sc, 1) for b in range(4)]
+        return float(np.mean([r["gap"] for r in runs]))
+    unsettled, settled = gap(0.0), gap(6.0)
+    print(unsettled, settled)
+    # the settled gap is not zero: a unit seen to survive its early rows
+    # is known, legitimately, to have had no event by then
+    assert unsettled > 0.2
+    assert settled < unsettled - 0.1
+
+
+def test_each_named_set_gets_its_own_event_checks(fast_scorer):
+    r = ww.report(event_table(clock_driven=False), unit="unit", time="time",
+                  event="event",
+                  features={"signal": ["level"], "junk": ["noise"]},
+                  horizon=12, repeats=2, n_pairs=800, _scorer=fast_scorer)
+    assert not r.skipped, r.skipped
+    for part in ("overlap", "chronological", "time_cut", "clock"):
+        got = getattr(r, part)
+        assert list(got) == ["signal", "junk"]
+        assert got["signal"].info["features"] == ["level"]
+        assert got["junk"].info["features"] == ["noise"]
+        assert set(r.to_dict()[part]) == {"signal", "junk"}
+    assert "columns: signal" in repr(r) and "columns: junk" in repr(r)
+    gain = {k: v.gain for k, v in r.clock.items()}
+    assert gain["signal"] > gain["junk"]
+    assert r.headline()["clock_gain"] == min(gain.values())
+    assert r.overlap["signal"].info["rows_without_follow_up"] > 0
+    assert "rows left out" in repr(r)
+    assert "only if their horizon has passed" in repr(r)
+
+
+def test_time_cut_says_when_no_label_is_known_by_the_cut(fast_scorer):
+    # every event here comes late, so no row before the cut has a
+    # positive label that was already known at the cut
+    r = ww.report(event_table(), unit="unit", time="time", event="event",
+                  features=["level"], horizon=12, repeats=2, n_pairs=600,
+                  _scorer=fast_scorer)
+    assert "known by the cut" in r.skipped["time_cut"]
