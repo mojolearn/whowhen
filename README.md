@@ -26,6 +26,13 @@ From the terminal, give a CSV file and the names of its columns:
 whowhen rows.csv --unit patient_id --time hour --event sepsis
 ```
 
+If the rows are not ordered in time (several samples per patient,
+several measurements per batch), leave the time column out:
+
+```bash
+whowhen samples.csv --unit patient_id --event tumour
+```
+
 In Python, pass a pandas DataFrame (your data table):
 
 ```python
@@ -34,6 +41,7 @@ import whowhen as ww
 
 df = pd.read_parquet("stays.parquet")
 print(ww.report(df, unit="patient_id", time="hour", event="sepsis"))
+print(ww.report(samples, unit="patient_id", event="tumour"))   # no time order
 ```
 
 Both interfaces run the same checks.
@@ -42,7 +50,7 @@ Both interfaces run the same checks.
 |---|---|---|---|
 | `df` | yes | | the table, one row per observation |
 | `unit` | yes | | the column naming the unit |
-| `time` | yes | | the column giving when the row was observed |
+| `time` | no | none | the column giving when the row was observed; leave it out if the rows are not ordered in time |
 | `event` | no | none | a column that is nonzero where the event happens |
 | `features` | no | every numeric column | the columns to check: a list, or a dict of named lists to compare side by side |
 | `horizon` | no | none | for forecasting tasks: how far ahead the event is predicted, in the time column's scale (`12`, or `"12h"` for datetimes) |
@@ -54,6 +62,8 @@ What runs depends on what you give:
 
 | You give | You get |
 |---|---|
+| `unit` only | the identity audit, the individual-or-type test, the per-column ranking for identity |
+| `unit` and `event` | plus the overlap check |
 | `unit` and `time` | the identity and timing audits, the timing placebo, the individual-or-type test, the audits by short and long gap, the per-column ranking |
 | plus `event` | the overlap check, the chronological control, the time-cut split, the clock baseline |
 | plus `horizon` | those three run as a forecast: "does the event come within this long after the row?" |
@@ -159,6 +169,10 @@ not in the table is outside what these checks see.
 - many units (hundreds or more), each observed more than once;
 - for the identity audit, several units observed at the same time
   values, since the different-unit pair is matched on time;
+- without a time column, a pair is two rows of one unit or one row each
+  from two units, with no matching on time. If the rows do have an
+  order, give the time column: unmatched pairs can also be told apart
+  by anything that changed between the times the units were observed;
 - with `horizon`, an event column flagged on the row where the event
   happens, not on every row of the unit.
 

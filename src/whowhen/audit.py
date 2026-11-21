@@ -86,8 +86,8 @@ def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
     if tr.sum() < 20 or te.sum() < 20:
         raise ValueError(
             f"the {kind} audit drew {int(tr.sum())} training and "
-            f"{int(te.sum())} held-out rows; too few units have two rows "
-            f"this offset apart")
+            f"{int(te.sum())} held-out rows; too few units have two rows"
+            + (" this offset apart" if frame.time is not None else ""))
     codes, inv = np.unique(np.concatenate([r[te] for r in roles_all]),
                            return_inverse=True)
     return Draw(kind, mode, k, ra, rb, y, tr,
@@ -194,8 +194,31 @@ def _feature_sets(features) -> dict:
     return sets
 
 
-def audit(panel: Panel, features, offset, *, scorer=None,
-          which=("identity", "timing"), impostors="random",
+def pair_gap(panel: Panel, offset, which) -> tuple:
+    """(audits to run, min gap, max gap), the gaps in the time column's
+    scale. Without a time column only the identity audit can run and
+    its pairs have no gap."""
+    if panel.time is None:
+        which = ("identity",) if which is None else which
+        which = (which,) if isinstance(which, str) else tuple(which)
+        late = [w for w in which if w != "identity"]
+        if late:
+            raise ValueError(f"the {' and '.join(late)} audit needs a "
+                             f"time column")
+        return which, 0.0, 0.0
+    which = ("identity", "timing") if which is None else which
+    which = (which,) if isinstance(which, str) else tuple(which)
+    bad = [w for w in which if w not in KINDS]
+    if bad:
+        raise ValueError(f"unknown audit {bad}; choose from {KINDS}")
+    lo, hi = panel.offset(offset[0]), panel.offset(offset[1])
+    if not 0 < lo <= hi:
+        raise ValueError("offset needs 0 < min <= max")
+    return which, lo, hi
+
+
+def audit(panel: Panel, features, offset=None, *, scorer=None,
+          which=None, impostors="random",
           n_pairs: int = 20000,
           max_pairs_per_unit: int = 20, repeats: int = 4,
           bootstrap: int = 2000, random: bool = False,
@@ -211,9 +234,11 @@ def audit(panel: Panel, features, offset, *, scorer=None,
         without a clock column, or before and after imputation).
     offset : (min, max) gap between the two rows of a pair, in the time
         column's scale; strings such as ("6h", "24h") for datetimes.
+        Not used when the panel has no time column.
     scorer : None for the default, 'mojolearn', 'catboost', an estimator
         with fit and predict_proba, or a function from a seed to one.
-    which : any of 'identity', 'timing', 'placebo'.
+    which : any of 'identity', 'timing', 'placebo'. Default: identity
+        and timing, or identity alone when the panel has no time column.
     impostors : 'random', 'nearest', or both in a tuple. See
         ``whowhen.pairs.identity_pairs``.
     n_pairs, max_pairs_per_unit : how many pairs to draw, and how many
@@ -231,14 +256,8 @@ def audit(panel: Panel, features, offset, *, scorer=None,
         result; pass that value here to repeat that exact run.
     """
     sets = _feature_sets(features)
-    which = (which,) if isinstance(which, str) else tuple(which)
-    bad = [w for w in which if w not in KINDS]
-    if bad:
-        raise ValueError(f"unknown audit {bad}; choose from {KINDS}")
+    which, lo, hi = pair_gap(panel, offset, which)
     modes = (impostors,) if isinstance(impostors, str) else tuple(impostors)
-    lo, hi = panel.offset(offset[0]), panel.offset(offset[1])
-    if not 0 < lo <= hi:
-        raise ValueError("offset needs 0 < min <= max")
     seed = pick_seed(seed, random)
     sc = resolve(scorer)
     columns = list(dict.fromkeys(c for v in sets.values() for c in v))
@@ -261,7 +280,8 @@ def audit(panel: Panel, features, offset, *, scorer=None,
     info = {"n_units": frame.n_units_all,
             "n_units_without_event": frame.n_units,
             "n_rows_audited": int(len(frame.unit)),
-            "offset": [str(offset[0]), str(offset[1])],
+            "offset": (None if panel.time is None
+                       else [str(offset[0]), str(offset[1])]),
             "repeats": repeats, "bootstrap": bootstrap, "seed": seed, "random": random,
             "feature_sets": sets, "workers": workers}
     return AuditResult(scorer=sc.describe(), info=info,

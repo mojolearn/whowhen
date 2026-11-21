@@ -72,3 +72,21 @@ def test_report_subcommand_is_removed(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 2
+
+
+def test_time_can_be_left_out(tmp_path, monkeypatch):
+    table = tmp_path / "rows.csv"
+    table.write_text("patient,value\na,2\n")
+    calls = []
+
+    class Report:
+        def headline(self):
+            return {}
+
+    monkeypatch.setattr(cli, "report",
+                        lambda df, **kw: calls.append(kw) or Report())
+    monkeypatch.setattr("sys.argv", ["whowhen", str(table), "--unit",
+                                     "patient"])
+    cli.main()
+    assert calls[0]["time"] is None
+

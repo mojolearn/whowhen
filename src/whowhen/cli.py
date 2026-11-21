@@ -1,7 +1,10 @@
 """Command line.
 
     whowhen rows.parquet --unit patient_id --time hour --event sepsis
+    whowhen samples.csv --unit patient_id --event tumour
     whowhen demo
+
+Leave --time out for a table whose rows are not ordered in time.
 
 To use a report in a script, name what counts as a failure:
 
@@ -70,7 +73,8 @@ def main() -> None:  # pragma: no cover
     r = ap
     r.add_argument("table", type=Path, help="parquet or CSV")
     r.add_argument("--unit", required=True)
-    r.add_argument("--time", required=True)
+    r.add_argument("--time", default=None,
+                   help="leave out for a table not ordered in time")
     r.add_argument("--event", default=None)
     r.add_argument("--horizon", default=None)
     r.add_argument("--repeats", type=int, default=4)

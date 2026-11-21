@@ -7,7 +7,8 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from ._stats import auc
-from .audit import KINDS, Draw, cores as n_cores, draw, n_workers, pick_seed
+from .audit import (Draw, cores as n_cores, draw, n_workers, pair_gap,
+                    pick_seed)
 from .panel import Frame, Panel
 from .scorers import Scorer, resolve
 
@@ -18,8 +19,8 @@ def _fit_auc(frame: Frame, d: Draw, cols: tuple, scorer: Scorer, seed: int,
     return auc(d.y[~d.tr], d.fit(frame, list(cols), scorer, seed, threads))
 
 
-def rank_columns(panel: Panel, columns, offset, *, scorer=None,
-                 which=("identity", "timing"),
+def rank_columns(panel: Panel, columns, offset=None, *, scorer=None,
+                 which=None,
                  n_pairs: int = 20000, max_pairs_per_unit: int = 20,
                  repeats: int = 4, random: bool = False,
                  seed: int | None = None,
@@ -53,13 +54,7 @@ def rank_columns(panel: Panel, columns, offset, *, scorer=None,
     seed = pick_seed(seed, random)
     if not columns:
         raise ValueError("rank_columns needs at least one column")
-    which = (which,) if isinstance(which, str) else tuple(which)
-    bad = [w for w in which if w not in KINDS]
-    if bad:
-        raise ValueError(f"unknown audit {bad}; choose from {KINDS}")
-    lo, hi = panel.offset(offset[0]), panel.offset(offset[1])
-    if not 0 < lo <= hi:
-        raise ValueError("offset needs 0 < min <= max")
+    which, lo, hi = pair_gap(panel, offset, which)
     sc = resolve(scorer)
     frame = panel.frame(columns)
     frame.repeats, frame.random = repeats, random

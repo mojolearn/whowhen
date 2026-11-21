@@ -3,6 +3,9 @@
     print(ww.report(df, unit="patient_id", time="hour", event="sepsis"))
 
 runs every check the panel supports and says which it skipped and why.
+Leave ``time`` out for a table whose rows are not ordered in time:
+
+    print(ww.report(df, unit="patient_id", event="tumour"))
 """
 from __future__ import annotations
 
@@ -94,6 +97,9 @@ class Report:
         if i["offset"]:
             out.append(f"rows of a pair are {i['offset'][0]} to "
                        f"{i['offset'][1]} apart (chosen from the data)")
+        if i.get("time", "") is None:
+            out.append("no time column: a pair is two rows of one unit, or "
+                       "one row each from two units")
         w = i.get("whowhen")
         if w:
             out.append(f"whowhen {w['version']} (doi:{w['doi']})")
@@ -133,7 +139,11 @@ class Report:
         return "\n".join(out)
 
 
-def report(df: pd.DataFrame, unit: str, time: str,
+NO_TIME = "no time column was given"
+NEEDS_TIME = ("gaps", "chronological", "time_cut", "clock")
+
+
+def report(df: pd.DataFrame, unit: str, time: str | None = None,
            event: str | None = None, *, features=None, horizon=None,
            repeats: int = 4,
            random: bool = False, n_pairs: int = 20000,
@@ -144,7 +154,10 @@ def report(df: pd.DataFrame, unit: str, time: str,
     ----------
     df : one row per observation.
     unit : the column naming the unit (patient, machine, loan, vessel).
-    time : the column giving when the row was observed.
+    time : optional column giving when the row was observed. Leave it
+        out for a table whose rows are not ordered in time. The identity
+        audit, the per-column ranking and the overlap check still run;
+        the timing audit and the checks that split by time do not.
     event : optional column, nonzero where the event happens. Without
         it the overlap check, the chronological control and the clock
         baseline are left out.
@@ -175,6 +188,8 @@ def report(df: pd.DataFrame, unit: str, time: str,
     report. A check that cannot run is listed under "not run" with the
     reason.
     """
+    if time is None and horizon is not None:
+        raise ValueError("a horizon needs a time column")
     panel = Panel(df, unit=unit, time=time, event=event)
     if features is None:
         features = [c for c in panel.df.columns
@@ -191,16 +206,18 @@ def report(df: pd.DataFrame, unit: str, time: str,
     rep = Report(scorer=sc.describe(), info={
         "whowhen": {"version": __version__, "doi": __doi__},
         "n_units": int(panel.df[unit].nunique()), "features": flat,
+        "time": time,
         "offset": None, "horizon": None if horizon is None else str(horizon),
         "repeats": repeats, "random": random, "seed": seed})
     common = dict(seed=seed, random=random, repeats=repeats)
     event_kw = dict(model=sc, horizon=horizon, **common)
-    offset = None
-    try:
-        offset = panel.default_offset()
-        rep.info["offset"] = [str(offset[0]), str(offset[1])]
-    except ValueError as e:
-        no_pairs = str(e)
+    offset = no_pairs = None
+    if time is not None:
+        try:
+            offset = panel.default_offset()
+            rep.info["offset"] = [str(offset[0]), str(offset[1])]
+        except ValueError as e:
+            no_pairs = str(e)
     def gaps():
         """The audits on the shorter and the longer half of the gap range."""
         lo, hi = offset
@@ -231,7 +248,8 @@ def report(df: pd.DataFrame, unit: str, time: str,
         "time_cut": lambda: per_set(overlap_check, time_split="calendar"),
         "audit": lambda: audit(panel, features, offset, scorer=sc,
                                n_pairs=n_pairs,
-                               which=("identity", "timing", "placebo"),
+                               which=(("identity", "timing", "placebo")
+                                      if time else ("identity",)),
                                impostors=("random", "nearest"), **common),
         "columns": lambda: rank_columns(panel, flat, offset, scorer=sc,
                                         n_pairs=n_pairs, **common),
@@ -241,7 +259,9 @@ def report(df: pd.DataFrame, unit: str, time: str,
         "clock": lambda: per_set(clock_baseline),
     }
     for part in PARTS:
-        if part in ("audit", "gaps", "columns") and offset is None:
+        if time is None and part in NEEDS_TIME:
+            rep.skipped[part] = NO_TIME
+        elif part in ("audit", "gaps", "columns") and no_pairs:
             rep.skipped[part] = no_pairs
         elif (part in ("overlap", "chronological", "time_cut", "clock")
               and not event):

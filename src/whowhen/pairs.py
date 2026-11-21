@@ -10,6 +10,10 @@ identity  two rows a set offset apart, either from one unit (label 1) or
           rows carry no information about which unit produced them, no
           classifier can beat AUC 0.5.
 
+Without a time column only the identity audit can run, and its pairs
+are not matched on time: two rows of one unit (label 1), or one row
+each from two units (label 0).
+
 All functions take and return row positions into a ``Frame``.
 """
 from __future__ import annotations
@@ -61,9 +65,16 @@ def split_units(frame: Frame, k: int, repeats: int,
 def _within_unit(frame: Frame, units: np.ndarray, lo: float, hi: float,
                  n_pairs: int, max_per_unit: int,
                  rng: np.random.Generator) -> np.ndarray:
-    """(first row, second row) of one unit, lo <= time gap <= hi."""
-    span = frame.time[frame.starts[units + 1] - 1] - frame.time[frame.starts[units]]
-    eligible = units[span >= lo].copy()
+    """(first row, second row) of one unit, lo <= time gap <= hi.
+    Without a time column: any two rows of one unit, in either order."""
+    timed = frame.time is not None
+    if timed:
+        span = (frame.time[frame.starts[units + 1] - 1]
+                - frame.time[frame.starts[units]])
+        eligible = units[span >= lo].copy()
+    else:
+        eligible = units[frame.starts[units + 1] - frame.starts[units]
+                         >= 2].copy()
     rng.shuffle(eligible)
     out = []
     for _ in range(max_per_unit):
@@ -71,6 +82,10 @@ def _within_unit(frame: Frame, units: np.ndarray, lo: float, hi: float,
             if len(out) >= n_pairs:
                 break
             s, e = frame.starts[u], frame.starts[u + 1]
+            if not timed:
+                i, j = rng.choice(e - s, 2, replace=False)
+                out.append((s + int(i), s + int(j)))
+                continue
             ts = frame.time[s:e]
             i = int(rng.integers(0, e - s))
             j0 = int(np.searchsorted(ts, ts[i] + lo, "left"))
@@ -90,12 +105,17 @@ class _Pool:
     """Rows of one side indexed by time, for impostor draws."""
 
     def __init__(self, frame: Frame, rows: np.ndarray):
-        order = np.argsort(frame.time[rows], kind="stable")
-        self.time, self.rows = frame.time[rows][order], rows[order]
-        self.frame = frame
+        self.frame, self.rows = frame, rows
+        if frame.time is not None:
+            order = np.argsort(frame.time[rows], kind="stable")
+            self.time, self.rows = frame.time[rows][order], rows[order]
 
-    def at(self, row: int) -> np.ndarray:
-        """Rows observed at ``row``'s time."""
+    def at(self, row: int, rng: np.random.Generator) -> np.ndarray:
+        """Rows observed at ``row``'s time. Without a time column: a
+        random draw of NEAREST_POOL rows of the side."""
+        if self.frame.time is None:
+            return np.unique(self.rows[rng.integers(0, len(self.rows),
+                                                    NEAREST_POOL)])
         t = self.frame.time[row]
         i0 = np.searchsorted(self.time, t, "left")
         i1 = np.searchsorted(self.time, t, "right")
@@ -135,7 +155,7 @@ def timing_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
         keep = []
         for a, b in pairs:
             u = frame.unit[a]
-            cand = pool.at(b)
+            cand = pool.at(b, rng)
             cand = cand[frame.unit[cand] != u]
             if len(cand):
                 keep.append((a, cand[rng.integers(0, len(cand))]))
@@ -157,7 +177,7 @@ def identity_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
     scorer whole. Returns (row_a, row_b, label, is_train).
 
     impostors="random"   the other unit is any unit observed at the
-                         matched time.
+                         matched time (any unit, without a time column).
     impostors="nearest"  the other unit is one of the units most like
                          the anchor's unit, by standardized per-unit
                          feature means computed within the side. Such
@@ -177,7 +197,7 @@ def identity_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
         for a, b in same:
             u = frame.unit[a]
             out.append((a, b, 1, side))
-            cand = pool.at(b)
+            cand = pool.at(b, rng)
             cand = cand[frame.unit[cand] != u]
             if not len(cand):
                 continue

@@ -281,6 +281,8 @@ def overlap_check(panel: Panel, features, *, model=None,
     if time_split not in TIME_SPLITS:
         raise ValueError(f"time_split must be one of {TIME_SPLITS}; "
                          f"got {time_split!r}")
+    if panel.time is None and (time_split or horizon is not None):
+        raise ValueError("a time split or a horizon needs a time column")
     features = list(features)
     if not features:
         raise ValueError("the feature set needs at least one column")

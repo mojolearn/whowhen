@@ -82,6 +82,8 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
     if not panel.event:
         raise ValueError("the clock baseline needs a panel with an event "
                          "column; pass event= to Panel")
+    if panel.time is None:
+        raise ValueError("the clock baseline needs a time column")
     features = list(features)
     seed = pick_seed(seed, random)
     sc = resolve(model)

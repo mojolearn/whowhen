@@ -1,4 +1,4 @@
-"""The input: one table with a unit column and a time column."""
+"""The input: one table with a unit column and, usually, a time column."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,28 +15,34 @@ class Panel:
     df : DataFrame with one row per (unit, time) observation.
     unit : column naming the unit (patient, machine, loan, user, vessel).
     time : column giving when the row was observed. Datetime or numeric.
+        Left out for a table whose rows are not ordered in time; the
+        checks that need an order then cannot run.
     event : optional column; a unit with any nonzero value is left out of
         the audits, so every audited row comes from a unit with no
         recorded event. The overlap check uses it as the label.
     """
 
-    def __init__(self, df: pd.DataFrame, unit: str, time: str,
+    def __init__(self, df: pd.DataFrame, unit: str, time: str | None = None,
                  event: str | None = None):
         for c in (unit, time, event):
             if c is not None and c not in df.columns:
                 raise KeyError(f"column {c!r} is not in the table")
-        t = df[time]
-        if not (pd.api.types.is_datetime64_any_dtype(t)
-                or pd.api.types.is_numeric_dtype(t)):
-            df = df.assign(**{time: pd.to_datetime(t)})
         n_before = len(df)
-        df = (df.drop_duplicates([unit, time])
-                .sort_values([unit, time], kind="stable")
-                .reset_index(drop=True))
+        if time is None:
+            df = df.sort_values(unit, kind="stable").reset_index(drop=True)
+        else:
+            t = df[time]
+            if not (pd.api.types.is_datetime64_any_dtype(t)
+                    or pd.api.types.is_numeric_dtype(t)):
+                df = df.assign(**{time: pd.to_datetime(t)})
+            df = (df.drop_duplicates([unit, time])
+                    .sort_values([unit, time], kind="stable")
+                    .reset_index(drop=True))
         self.df = df
         self.unit, self.time, self.event = unit, time, event
         self.n_duplicates_dropped = n_before - len(df)
-        self.datetime = pd.api.types.is_datetime64_any_dtype(df[time])
+        self.datetime = (time is not None
+                         and pd.api.types.is_datetime64_any_dtype(df[time]))
 
     def __repr__(self) -> str:
         return (f"Panel({len(self.df):,} rows, "
@@ -46,6 +52,8 @@ class Panel:
 
     def offset(self, value) -> float:
         """An offset in the time column's own scale."""
+        if self.time is None:
+            raise ValueError("an offset or a horizon needs a time column")
         if self.datetime:
             if isinstance(value, (int, float)):
                 raise TypeError(
@@ -69,7 +77,8 @@ class Panel:
 
     def frame(self, columns: list[str],
               keep_event_units: bool = False) -> "Frame":
-        """Plain arrays for the audits. Rows stay sorted by (unit, time)."""
+        """Plain arrays for the audits. Rows stay sorted by (unit, time),
+        or by unit alone when there is no time column."""
         missing = [c for c in columns if c not in self.df.columns]
         if missing:
             raise KeyError(f"feature columns not in the table: {missing}")
@@ -79,9 +88,11 @@ class Panel:
             bad = df.loc[df[self.event].fillna(0) != 0, self.unit].unique()
             df = df[~df[self.unit].isin(bad)]
         unit, labels = pd.factorize(df[self.unit], sort=False)
-        t = df[self.time]
-        time = (t.astype("datetime64[ns]").astype("int64").to_numpy(float)
-                if self.datetime else t.to_numpy(float))
+        time = None
+        if self.time is not None:
+            t = df[self.time]
+            time = (t.astype("datetime64[ns]").astype("int64").to_numpy(float)
+                    if self.datetime else t.to_numpy(float))
         X = np.empty((len(df), len(columns)), dtype=np.float32)
         for j, c in enumerate(columns):
             col = df[c]
@@ -104,7 +115,8 @@ class Panel:
 @dataclass
 class Frame:
     unit: np.ndarray          # int code per row; rows of a unit contiguous
-    time: np.ndarray          # float per row, ascending within a unit
+    time: np.ndarray | None   # float per row, ascending within a unit;
+                              # None when the table has no time column
     X: np.ndarray             # float32, rows x columns
     columns: list
     starts: np.ndarray        # unit u owns rows starts[u]:starts[u + 1]

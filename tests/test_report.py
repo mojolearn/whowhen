@@ -296,3 +296,65 @@ def test_time_cut_says_when_no_label_is_known_by_the_cut(fast_scorer):
                   features=["level"], horizon=12, repeats=2, n_pairs=600,
                   _scorer=fast_scorer)
     assert "known by the cut" in r.skipped["time_cut"]
+
+
+def untimed_table(n_units=300, rows=12, seed=0):
+    """Rows with no order: ``trait`` is a unit's own level seen noisily,
+    ``noise`` is unrelated to the unit. The event follows the trait."""
+    rng = np.random.default_rng(seed)
+    u = np.repeat(np.arange(n_units), rows)
+    trait = rng.normal(0, 1, n_units)
+    df = pd.DataFrame({"unit": u,
+                       "trait": trait[u] + rng.normal(0, 0.3, len(u)),
+                       "noise": rng.normal(0, 1, len(u)),
+                       "event": (rng.random(len(u))
+                                 < 1 / (1 + np.exp(-2 * trait[u]))).astype(int)})
+    return df.sample(frac=1.0, random_state=seed)
+
+
+def test_pairs_without_time_respect_unit_and_split():
+    from whowhen import pairs
+    panel = Panel(untimed_table().drop(columns="event"), unit="unit")
+    f = panel.frame(["trait", "noise"])
+    assert f.time is None
+    train = pairs.split_units(f, 0, 4)
+    for mode in ("random", "nearest"):
+        ra, rb, lab, tr = pairs.identity_pairs(
+            f, 0.0, 0.0, 800, 2, np.random.default_rng(0), train, mode)
+        assert (ra != rb).all() and (lab == 1).sum() and (lab == 0).sum()
+        assert ((f.unit[ra] == f.unit[rb]) == (lab == 1)).all()
+        assert (train[f.unit[ra]] == tr).all()
+        assert (train[f.unit[rb]] == tr).all()
+
+
+def test_report_without_time(fast_scorer):
+    df = untimed_table()
+    r = ww.report(df.drop(columns="event"), unit="unit",
+                  features={"trait": ["trait"], "noise": ["noise"]},
+                  repeats=2, n_pairs=3000, _scorer=fast_scorer)
+    t = r.audit.identity
+    auc = lambda name, mode="random": float(
+        t[(t["features"] == name) & (t["impostors"] == mode)]["auc"].iloc[0])
+    assert auc("trait") > 0.75
+    # against units with nearly the same trait, the trait says little
+    assert auc("trait", "nearest") < auc("trait") - 0.15
+    assert abs(auc("noise") - 0.5) < 0.06
+    assert abs(auc("noise", "nearest") - 0.5) < 0.06
+    assert r.audit.timing is None and r.audit.placebo is None
+    assert list(r.columns) == ["identity"]
+    assert r.info["offset"] is None and r.info["time"] is None
+    assert {k for k, v in r.skipped.items()
+            if v == "no time column was given"} == {
+        "gaps", "chronological", "time_cut", "clock"}
+    assert "no time column: a pair is" in repr(r)
+    assert set(r.headline()) == {"identity", "identity_nearest"}
+    # with an event column the overlap check runs too
+    r = ww.report(df, unit="unit", event="event", features=["trait"],
+                  repeats=2, n_pairs=1500, _scorer=fast_scorer)
+    assert r.overlap is not None and "overlap_gap" in r.headline()
+    assert r.chronological is None and r.clock is None
+
+
+def test_horizon_without_time_is_an_error():
+    with pytest.raises(ValueError, match="horizon needs a time column"):
+        ww.report(untimed_table(), unit="unit", event="event", horizon=3)
