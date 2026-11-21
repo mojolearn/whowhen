@@ -52,8 +52,7 @@ Both interfaces run the same checks.
 | `unit` | yes | | the column naming the unit |
 | `time` | no | none | the column giving when the row was observed; leave it out if the rows are not ordered in time |
 | `event` | no | none | a column that is nonzero where the event happens |
-| `features` | no | every numeric column | the columns to check: a list, or a dict of named lists to compare side by side |
-| `importance` | no | `False` | column importance: `True` for every checked column, or a list of columns. It costs two model fits per ranked column, per test and repeat, so it is the slowest part on a wide table |
+| `features` | no | every numeric column, no column importance | `["whowhenall"]`: every numeric column, each ranked by column importance. A list: only those columns, each ranked. A dict of named lists: each set checked side by side |
 | `horizon` | no | none | for forecasting tasks: how far ahead the event is predicted, in the time column's scale (`12`, or `"12h"` for datetimes) |
 | `repeats` | no | 4 | how many times every check is run |
 | `random` | no | `False` | draw held-out units at random instead of the fixed groups |
@@ -68,7 +67,7 @@ What runs depends on what you give:
 | `unit` and `time` | the re-identification and time-order tests, the placebo test, results by time gap |
 | plus `event` | record-wise vs subject-wise validation, the within-unit temporal split, out-of-time validation, the time-only baseline |
 | plus `horizon` | the event checks run as a forecast: "does the event come within this long after the row?" |
-| `importance` | column importance for the re-identification and time-order tests |
+| `features` | column importance for the named columns, or for every column with `["whowhenall"]` |
 
 A check that cannot run is listed at the end of the report with the
 reason.
@@ -131,7 +130,10 @@ The range runs from the median time between a unit's consecutive rows
 to half the median time a unit is observed. If re-identification stays
 high at the long gap, units stay recognizable as time passes.
 
-**Column importance.** Off unless you set `importance`. For each
+**Column importance.** Runs when `features` names columns, or for every
+column with `features=["whowhenall"]`. It costs two model fits per
+column, per test and repeat, so on a wide table it takes longer than
+everything else. For each
 column: the single-column AUC (that column alone) and the drop-column
 importance (how much the AUC falls when that column is removed), on the
 same pairs.
@@ -239,12 +241,12 @@ environment variable to use fewer.
 
 ```
 whowhen rows.parquet --unit patient_id --time hour --event sepsis
-whowhen rows.parquet --unit patient_id --time hour --importance
+whowhen rows.parquet --unit patient_id --time hour --features whowhenall
 whowhen demo
 ```
 
-CSV and Parquet files are supported. `--importance` alone ranks every
-column; `--importance a b` ranks only those. Use `whowhen --help` for
+CSV and Parquet files are supported. `--features whowhenall` checks and
+ranks every column; `--features a b` checks and ranks only those. Use `whowhen --help` for
 report options or `whowhen demo --help` for demo options.
 
 To use a report in a script or a scheduled job, say what counts as a

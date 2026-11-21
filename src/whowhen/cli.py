@@ -78,10 +78,10 @@ def main() -> None:  # pragma: no cover
     r.add_argument("--time", default=None,
                    help="leave out for a table not ordered in time")
     r.add_argument("--event", default=None)
-    r.add_argument("--importance", nargs="*", default=None,
-                   metavar="COLUMN",
-                   help="rank columns by single-column AUC and drop-column "
-                        "importance: every column, or only those named")
+    r.add_argument("--features", nargs="+", default=None, metavar="COLUMN",
+                   help="check only these columns and rank each one by "
+                        "column importance; whowhenall checks and ranks "
+                        "every numeric column")
     r.add_argument("--horizon", default=None)
     r.add_argument("--repeats", type=int, default=4)
     r.add_argument("--random", action="store_true")
@@ -105,10 +105,9 @@ def main() -> None:  # pragma: no cover
             horizon = float(horizon)
         except ValueError:
             pass
-    importance = (False if args.importance is None
-                  else args.importance or True)
     rep = report(df, unit=args.unit, time=args.time, event=args.event,
-                 importance=importance, horizon=horizon, repeats=args.repeats, random=args.random)
+                 features=args.features, horizon=horizon,
+                 repeats=args.repeats, random=args.random)
     print(rep)
     if args.out:
         import json

@@ -20,7 +20,7 @@
 | time-cut split, `time_cut`, `time_cut_gap` | out-of-time validation, `out_of_time`, `out_of_time_gap` |
 | clock baseline, `clock`, `clock_gain` | time-only baseline, `time_only`, `time_only_gain` (inputs `time`, `features + time`) |
 
-- Column importance (single-column AUC and drop-column importance) is off by default. `importance=True` ranks every checked column, and a list ranks only those columns; on the command line, `--importance` or `--importance COLUMN ...`. It costs two model fits per ranked column for each audit and repeat, so on a table with hundreds of columns it took far longer than every other check together.
+- Column importance (single-column AUC and drop-column importance) runs only when `features` names columns. Left out, every check runs on every numeric column without it. `features=["whowhenall"]` checks and ranks every numeric column; a list checks and ranks those columns. On the command line, `--features whowhenall` or `--features COLUMN ...`. Column importance costs two model fits per column for each test and repeat, so on a table with hundreds of columns it took far longer than every other check together.
 
 ## 0.2.1
 

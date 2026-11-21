@@ -67,7 +67,7 @@ def test_time_only_baseline_sees_elapsed_time(fast_scorer):
 def test_report_runs_everything(fast_scorer):
     r = ww.report(event_table(clock_driven=False), unit="unit", time="time",
                   event="event", horizon=12, repeats=2, n_pairs=1500,
-                  importance=True, _scorer=fast_scorer)
+                  features=["whowhenall"], _scorer=fast_scorer)
     assert r.info["features"] == ["level", "noise"]
     assert r.info["offset"] and not r.skipped, r.skipped
     for part in ("pair_tests", "by_gap", "importance", "record_wise", "temporal_split",
@@ -90,24 +90,21 @@ def test_report_without_event(fast_scorer):
     assert r.pair_tests is not None and r.importance is None
     assert set(r.skipped) == {"importance", "record_wise", "temporal_split",
                               "out_of_time", "time_only"}
-    assert "off by default" in r.skipped["importance"]
+    assert "whowhenall" in r.skipped["importance"]
     assert "no event column" in repr(r)
 
 
 def test_report_on_chosen_columns(fast_scorer):
     df = event_table().drop(columns="event")
     r = ww.report(df, unit="unit", time="time", features=["level"],
-                  importance=True, repeats=1, n_pairs=600,
-                  _scorer=fast_scorer)
+                  repeats=1, n_pairs=600, _scorer=fast_scorer)
     assert r.info["features"] == ["level"]
     assert list(r.importance["reidentification"]["column"]) == ["level"]
-    # a list ranks only the named columns
-    r = ww.report(df, unit="unit", time="time", importance=["noise"],
-                  repeats=1, n_pairs=600, _scorer=fast_scorer)
-    t = r.importance["reidentification"]
-    assert list(t["column"]) == ["noise"]
-    with pytest.raises(ValueError, match="not checked"):
-        ww.report(df, unit="unit", time="time", importance=["nope"])
+    with pytest.raises(ValueError, match="goes alone"):
+        ww.report(df, unit="unit", time="time",
+                  features=["whowhenall", "level"])
+    with pytest.raises(TypeError):
+        ww.report(df, unit="unit", time="time", features="level")
     r = ww.report(df, unit="unit", time="time", repeats=1, n_pairs=600,
                   features={"a": ["level"], "b": ["level", "noise"]},
                   _scorer=fast_scorer)
@@ -169,7 +166,7 @@ def test_whole_report_is_the_same_every_time(fast_scorer):
     def run():
         return ww.report(event_table(n_units=200, clock_driven=False),
                          unit="unit", time="time", event="event", horizon=12,
-                         repeats=2, n_pairs=800, importance=True,
+                         repeats=2, n_pairs=800, features=["whowhenall"],
                          _scorer=fast_scorer).to_dict()
     a, b = run(), run()
     assert not a["skipped"], a["skipped"]
@@ -284,7 +281,7 @@ def test_each_named_set_gets_its_own_event_checks(fast_scorer):
                   event="event",
                   features={"signal": ["level"], "junk": ["noise"]},
                   horizon=12, repeats=2, n_pairs=800, _scorer=fast_scorer)
-    assert set(r.skipped) == {"importance"}, r.skipped
+    assert not r.skipped, r.skipped
     for part in ("record_wise", "temporal_split", "out_of_time", "time_only"):
         got = getattr(r, part)
         assert list(got) == ["signal", "junk"]
@@ -342,7 +339,7 @@ def test_report_without_time(fast_scorer):
     df = untimed_table()
     r = ww.report(df.drop(columns="event"), unit="unit",
                   features={"trait": ["trait"], "noise": ["noise"]},
-                  importance=True, repeats=2, n_pairs=3000, _scorer=fast_scorer)
+                  repeats=2, n_pairs=3000, _scorer=fast_scorer)
     t = r.pair_tests.reidentification
     auc = lambda name, mode="random": float(
         t[(t["features"] == name) & (t["controls"] == mode)]["auc"].iloc[0])

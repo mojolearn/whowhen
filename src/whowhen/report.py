@@ -144,12 +144,12 @@ class Report:
 
 
 NO_TIME = "no time column was given"
+ALL = "whowhenall"    # features=[ALL]: every column, with column importance
 NEEDS_TIME = ("by_gap", "temporal_split", "out_of_time", "time_only")
 
 
 def report(df: pd.DataFrame, unit: str, time: str | None = None,
-           event: str | None = None, *, features=None, importance=False,
-           horizon=None,
+           event: str | None = None, *, features=None, horizon=None,
            repeats: int = 4,
            random: bool = False, n_pairs: int = 20000,
            _scorer=None) -> Report:
@@ -167,16 +167,18 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
     event : optional column, nonzero where the event happens. Without
         it record-wise vs subject-wise validation, the temporal split,
         out-of-time validation and the time-only baseline are left out.
-    features : optional. The columns to check: a list, or a dict of
-        named lists to check side by side (for example
-        {"raw": [...], "filled": [...]}, or with and without a time
-        column). The pair tests score each named set on the same pairs, and
-        each check that needs an event column runs once per set.
-        Default: every numeric column other than unit, time and event.
-    importance : False by default. True ranks every checked column by
-        single-column AUC and drop-column importance; a list ranks only
-        those columns. Each ranked column costs two model fits per test
-        and repeat, so this is the slowest part on a wide table.
+    features : optional.
+        Left out: every check runs on every numeric column other than
+        unit, time and event, and column importance does not run.
+        ["whowhenall"]: the same columns, and column importance ranks
+        every one of them.
+        A list of columns: every check runs on those columns, and
+        column importance ranks them.
+        A dict of named lists, such as {"raw": [...], "filled": [...]}:
+        every check runs once per set, side by side, and column
+        importance ranks every named column.
+        Column importance costs two model fits per column, per test and
+        repeat, so on a wide table it takes longer than everything else.
     horizon : optional. With it the event checks forecast: "does the
         event come within this long after the row?", in the time
         column's scale (a string such as '12h' for datetimes). The
@@ -201,23 +203,20 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
     if time is None and horizon is not None:
         raise ValueError("a horizon needs a time column")
     panel = Panel(df, unit=unit, time=time, event=event)
-    if features is None:
+    if isinstance(features, str):
+        raise TypeError('features is a list of columns, ["whowhenall"], or '
+                        'a dict of named lists')
+    ranked = features is not None
+    if features is None or list(features) == [ALL]:
         features = [c for c in panel.df.columns
                     if c not in (unit, time, event)
                     and pd.api.types.is_numeric_dtype(panel.df[c])]
     flat = (list(dict.fromkeys(c for v in features.values() for c in v))
             if isinstance(features, dict) else list(features))
+    if ALL in flat:
+        raise ValueError(f'"{ALL}" goes alone: features=["{ALL}"]')
     if not flat:
         raise ValueError("there are no columns to check")
-    if importance is not True and importance is not False:
-        if isinstance(importance, str):
-            raise TypeError("importance is True, False, or a list of "
-                            "column names")
-        importance = list(importance)
-        unknown = [c for c in importance if c not in flat]
-        if unknown or not importance:
-            raise ValueError(f"importance names columns that are not "
-                             f"checked: {unknown}")
     sets = _feature_sets(features)
     seed = pick_seed(None, random)
     sc = resolve(_scorer)
@@ -270,9 +269,7 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
                                which=(("reidentification", "time_order", "placebo")
                                       if time else ("reidentification",)),
                                controls=("random", "nearest_neighbour"), **common),
-        "importance": lambda: rank_columns(panel, flat, offset,
-                                        rank=None if importance is True
-                                        else importance, scorer=sc,
+        "importance": lambda: rank_columns(panel, flat, offset, scorer=sc,
                                         n_pairs=n_pairs, **common),
         "record_wise": lambda: per_set(overlap_check),
         "temporal_split": lambda: per_set(overlap_check,
@@ -280,9 +277,9 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
         "time_only": lambda: per_set(clock_baseline),
     }
     for part in PARTS:
-        if part == "importance" and importance is False:
-            rep.skipped[part] = ("off by default; importance=True ranks "
-                                 "every column, or give a list")
+        if part == "importance" and not ranked:
+            rep.skipped[part] = (f'runs when features names columns; '
+                                 f'features=["{ALL}"] ranks every column')
         elif time is None and part in NEEDS_TIME:
             rep.skipped[part] = NO_TIME
         elif part in ("pair_tests", "by_gap", "importance") and no_pairs:
