@@ -67,7 +67,7 @@ def test_clock_baseline_sees_the_clock(fast_scorer):
 def test_report_runs_everything(fast_scorer):
     r = ww.report(event_table(clock_driven=False), unit="unit", time="time",
                   event="event", horizon=12, repeats=2, n_pairs=1500,
-                  _scorer=fast_scorer)
+                  importance=True, _scorer=fast_scorer)
     assert r.info["features"] == ["level", "noise"]
     assert r.info["offset"] and not r.skipped, r.skipped
     for part in ("audit", "gaps", "columns", "overlap", "chronological",
@@ -86,17 +86,27 @@ def test_report_without_event(fast_scorer):
     df = event_table().drop(columns="event")
     r = ww.report(df, unit="unit", time="time", repeats=1, n_pairs=800,
                   _scorer=fast_scorer)
-    assert r.audit is not None and r.columns is not None
-    assert set(r.skipped) == {"overlap", "chronological", "time_cut", "clock"}
+    assert r.audit is not None and r.columns is None
+    assert set(r.skipped) == {"columns", "overlap", "chronological",
+                              "time_cut", "clock"}
+    assert "off by default" in r.skipped["columns"]
     assert "no event column" in repr(r)
 
 
 def test_report_on_chosen_columns(fast_scorer):
     df = event_table().drop(columns="event")
     r = ww.report(df, unit="unit", time="time", features=["level"],
-                  repeats=1, n_pairs=600, _scorer=fast_scorer)
+                  importance=True, repeats=1, n_pairs=600,
+                  _scorer=fast_scorer)
     assert r.info["features"] == ["level"]
     assert list(r.columns["identity"]["column"]) == ["level"]
+    # a list ranks only the named columns
+    r = ww.report(df, unit="unit", time="time", importance=["noise"],
+                  repeats=1, n_pairs=600, _scorer=fast_scorer)
+    t = r.columns["identity"]
+    assert list(t["column"]) == ["noise"]
+    with pytest.raises(ValueError, match="not checked"):
+        ww.report(df, unit="unit", time="time", importance=["nope"])
     r = ww.report(df, unit="unit", time="time", repeats=1, n_pairs=600,
                   features={"a": ["level"], "b": ["level", "noise"]},
                   _scorer=fast_scorer)
@@ -158,7 +168,7 @@ def test_whole_report_is_the_same_every_time(fast_scorer):
     def run():
         return ww.report(event_table(n_units=200, clock_driven=False),
                          unit="unit", time="time", event="event", horizon=12,
-                         repeats=2, n_pairs=800,
+                         repeats=2, n_pairs=800, importance=True,
                          _scorer=fast_scorer).to_dict()
     a, b = run(), run()
     assert not a["skipped"], a["skipped"]
@@ -273,7 +283,7 @@ def test_each_named_set_gets_its_own_event_checks(fast_scorer):
                   event="event",
                   features={"signal": ["level"], "junk": ["noise"]},
                   horizon=12, repeats=2, n_pairs=800, _scorer=fast_scorer)
-    assert not r.skipped, r.skipped
+    assert set(r.skipped) == {"columns"}, r.skipped
     for part in ("overlap", "chronological", "time_cut", "clock"):
         got = getattr(r, part)
         assert list(got) == ["signal", "junk"]
@@ -331,7 +341,7 @@ def test_report_without_time(fast_scorer):
     df = untimed_table()
     r = ww.report(df.drop(columns="event"), unit="unit",
                   features={"trait": ["trait"], "noise": ["noise"]},
-                  repeats=2, n_pairs=3000, _scorer=fast_scorer)
+                  importance=True, repeats=2, n_pairs=3000, _scorer=fast_scorer)
     t = r.audit.identity
     auc = lambda name, mode="random": float(
         t[(t["features"] == name) & (t["impostors"] == mode)]["auc"].iloc[0])
@@ -344,7 +354,7 @@ def test_report_without_time(fast_scorer):
     assert list(r.columns) == ["identity"]
     assert r.info["offset"] is None and r.info["time"] is None
     assert {k for k, v in r.skipped.items()
-            if v == "no time column was given"} == {
+            if v.startswith("no time column")} == {
         "gaps", "chronological", "time_cut", "clock"}
     assert "no time column: a pair is" in repr(r)
     assert set(r.headline()) == {"identity", "identity_nearest"}

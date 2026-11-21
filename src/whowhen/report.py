@@ -144,7 +144,8 @@ NEEDS_TIME = ("gaps", "chronological", "time_cut", "clock")
 
 
 def report(df: pd.DataFrame, unit: str, time: str | None = None,
-           event: str | None = None, *, features=None, horizon=None,
+           event: str | None = None, *, features=None, importance=False,
+           horizon=None,
            repeats: int = 4,
            random: bool = False, n_pairs: int = 20000,
            _scorer=None) -> Report:
@@ -156,7 +157,7 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
     unit : the column naming the unit (patient, machine, loan, vessel).
     time : optional column giving when the row was observed. Leave it
         out for a table whose rows are not ordered in time. The identity
-        audit, the per-column ranking and the overlap check still run;
+        audit, the column importance and the overlap check still run;
         the timing audit and the checks that split by time do not.
     event : optional column, nonzero where the event happens. Without
         it the overlap check, the chronological control and the clock
@@ -167,6 +168,10 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
         column). The audits score each named set on the same pairs, and
         each check that needs an event column runs once per set.
         Default: every numeric column other than unit, time and event.
+    importance : False by default. True ranks every checked column by
+        single-column AUC and drop-column importance; a list ranks only
+        those columns. Each ranked column costs two model fits per audit
+        and repeat, so this is the slowest part on a wide table.
     horizon : optional. With it the event checks forecast: "does the
         event come within this long after the row?", in the time
         column's scale (a string such as '12h' for datetimes). The
@@ -199,6 +204,15 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
             if isinstance(features, dict) else list(features))
     if not flat:
         raise ValueError("there are no columns to check")
+    if importance is not True and importance is not False:
+        if isinstance(importance, str):
+            raise TypeError("importance is True, False, or a list of "
+                            "column names")
+        importance = list(importance)
+        unknown = [c for c in importance if c not in flat]
+        if unknown or not importance:
+            raise ValueError(f"importance names columns that are not "
+                             f"checked: {unknown}")
     sets = _feature_sets(features)
     seed = pick_seed(None, random)
     sc = resolve(_scorer)
@@ -251,7 +265,9 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
                                which=(("identity", "timing", "placebo")
                                       if time else ("identity",)),
                                impostors=("random", "nearest"), **common),
-        "columns": lambda: rank_columns(panel, flat, offset, scorer=sc,
+        "columns": lambda: rank_columns(panel, flat, offset,
+                                        rank=None if importance is True
+                                        else importance, scorer=sc,
                                         n_pairs=n_pairs, **common),
         "overlap": lambda: per_set(overlap_check),
         "chronological": lambda: per_set(overlap_check,
@@ -259,7 +275,10 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
         "clock": lambda: per_set(clock_baseline),
     }
     for part in PARTS:
-        if time is None and part in NEEDS_TIME:
+        if part == "columns" and importance is False:
+            rep.skipped[part] = ("off by default; importance=True ranks "
+                                 "every column, or give a list")
+        elif time is None and part in NEEDS_TIME:
             rep.skipped[part] = NO_TIME
         elif part in ("audit", "gaps", "columns") and no_pairs:
             rep.skipped[part] = no_pairs

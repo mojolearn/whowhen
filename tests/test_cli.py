@@ -37,7 +37,8 @@ def test_table_command_reads_csv_and_writes_report(tmp_path, monkeypatch, capsys
     assert calls[0][0].to_dict("records") == [
         {"patient": "a", "hour": 0, "event": 0, "value": 2}]
     assert calls[0][1] == dict(unit="patient", time="hour", event="event",
-                              horizon=12.0, repeats=4, random=False)
+                              importance=False, horizon=12.0, repeats=4,
+                              random=False)
     assert json.loads(output.read_text()) == {"checked": True}
     captured = capsys.readouterr()
     assert "audit report" in captured.out
@@ -89,4 +90,24 @@ def test_time_can_be_left_out(tmp_path, monkeypatch):
                                      "patient"])
     cli.main()
     assert calls[0]["time"] is None
+
+
+@pytest.mark.parametrize("flag, expected", [
+    ([], False), (["--importance"], True),
+    (["--importance", "a", "b"], ["a", "b"])])
+def test_importance_flag(tmp_path, monkeypatch, flag, expected):
+    table = tmp_path / "rows.csv"
+    table.write_text("patient,a,b\nx,1,2\n")
+    calls = []
+
+    class Report:
+        def headline(self):
+            return {}
+
+    monkeypatch.setattr(cli, "report",
+                        lambda df, **kw: calls.append(kw) or Report())
+    monkeypatch.setattr("sys.argv", ["whowhen", str(table), "--unit",
+                                     "patient", *flag])
+    cli.main()
+    assert calls[0]["importance"] == expected
 

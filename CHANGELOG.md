@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+- Column importance (single-column AUC and drop-column importance) is off by default. `importance=True` ranks every checked column, and a list ranks only those columns; on the command line, `--importance` or `--importance COLUMN ...`. It costs two model fits per ranked column for each audit and repeat, so on a table with hundreds of columns it took far longer than every other check together.
+
 ## 0.2.1
 
 - `time` can be left out, for tables whose rows are not ordered in time: `ww.report(df, unit="patient_id")` or `whowhen TABLE --unit patient_id`. The identity audit and its per-column ranking run on pairs that are not matched on time, and the overlap check runs when an event column is given. The timing audit, its placebo, the audits by gap, the chronological control, the time-cut split and the clock baseline are listed as not run. Calls that give `time` are unchanged.
