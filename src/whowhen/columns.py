@@ -25,34 +25,35 @@ def rank_columns(panel: Panel, columns, offset=None, *, rank=None,
                  repeats: int = 4, random: bool = False,
                  seed: int | None = None,
                  n_jobs: int | None = None) -> dict[str, pd.DataFrame]:
-    """Rank columns by how much identity or timing signal each carries.
+    """Column importance for the re-identification and time-order tests.
 
-    For each audit in ``which`` and each seed, the pairs and the unit
+    For each test in ``which`` and each seed, the pairs and the unit
     split are drawn once and shared by every fit, so differences between
     columns are not pair noise. The draws are the ones audit() makes
     for the same seed.
 
     ``columns`` are all the columns the scorer sees; ``rank`` the ones to
     score, all of ``columns`` by default. Each ranked column costs two
-    fits per audit and repeat (alone, and all columns without it), so a
+    fits per test and repeat (alone, and all columns without it), so a
     short ``rank`` list keeps a wide table cheap.
 
-    Returns a dict from audit name to a table with one row per column,
-    sorted by ``alone`` descending:
+    Returns a dict from test name to a table with one row per column,
+    sorted by ``single_column_auc`` descending:
 
     column : the column.
-    alone : AUC using that column only, mean over repeats.
-    drop : AUC with all columns minus AUC without that column, mean over
-        repeats. Near zero means the other columns cover what it carries.
-        With a single column, the set without it scores 0.5 (chance).
-    all : AUC with all columns, the same on every row.
+    single_column_auc : AUC using that column only, mean over repeats.
+    drop_column_importance : AUC with all columns minus AUC without that
+        column, mean over repeats. Near zero means the other columns
+        cover what it carries. With a single column, the set without it
+        scores 0.5 (chance).
+    all_columns_auc : AUC with all columns, the same on every row.
 
     The scorer description is in each table's ``attrs["scorer"]``. No
     bootstrap is run: this is a ranking, not an interval estimate; use
     audit() for intervals on any set this points to.
 
     Parameters are as in audit(). n_jobs : parallel workers over
-    (audit, seed, column set) fits; every core by default, or the
+    (test, seed, column set) fits; every core by default, or the
     WHOWHEN_JOBS environment variable.
     """
     columns = list(dict.fromkeys(columns))
@@ -70,18 +71,19 @@ def rank_columns(panel: Panel, columns, offset=None, *, rank=None,
     frame.repeats, frame.random = repeats, random
     if frame.n_units < 10:
         raise ValueError(f"only {frame.n_units} units without an event; "
-                         f"the audits need many units")
+                         f"the pair tests need many units")
     cores = n_cores()
 
-    # Phase 1: one draw per (audit, seed), in parallel.
+    # Phase 1: one draw per (test, seed), in parallel.
     keys = [(kind, k) for kind in which for k in range(repeats)]
     workers = n_workers(n_jobs, len(keys))
     draws = dict(zip(keys, Parallel(n_jobs=workers)(
         delayed(draw)(frame, kind, "random", k, seed, lo, hi, n_pairs,
                       max_pairs_per_unit) for kind, k in keys)))
 
-    # Phase 2: every (audit, seed, column set) fit, in parallel. Column
-    # sets are deduplicated, so one column's "alone" and "all" share a fit.
+    # Phase 2: every (test, seed, column set) fit, in parallel. Column
+    # sets are deduplicated, so a lone column's single-column and
+    # all-columns AUC share a fit.
     idx = list(range(len(columns)))
     ranked = [columns.index(c) for c in rank]
     full = tuple(idx)
@@ -107,10 +109,12 @@ def rank_columns(panel: Panel, columns, offset=None, *, rank=None,
             c = columns[j]
             rest = tuple(i for i in idx if i != j)
             rows.append({"column": c,
-                         "alone": float(per_seed((j,)).mean()),
-                         "drop": float((a_full - per_seed(rest)).mean()),
-                         "all": float(a_full.mean())})
-        t = (pd.DataFrame(rows).sort_values("alone", ascending=False,
+                         "single_column_auc": float(per_seed((j,)).mean()),
+                         "drop_column_importance":
+                             float((a_full - per_seed(rest)).mean()),
+                         "all_columns_auc": float(a_full.mean())})
+        t = (pd.DataFrame(rows).sort_values("single_column_auc",
+                                            ascending=False,
                                             kind="stable")
              .reset_index(drop=True))
         t.attrs["scorer"] = sc.describe()

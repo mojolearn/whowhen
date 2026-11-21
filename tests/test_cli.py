@@ -20,7 +20,7 @@ def test_table_command_reads_csv_and_writes_report(tmp_path, monkeypatch, capsys
             return {"checked": True}
 
         def headline(self):
-            return {"overlap_gap": 0.03}
+            return {"record_wise_gap": 0.03}
 
     def report(df, **kwargs):
         calls.append((df, kwargs))
@@ -30,7 +30,7 @@ def test_table_command_reads_csv_and_writes_report(tmp_path, monkeypatch, capsys
     monkeypatch.setattr("sys.argv", ["whowhen", str(table), "--unit", "patient",
                                    "--time", "hour", "--event", "event",
                                    "--horizon", "12", "--out", str(output),
-                                   "--fail-if", "overlap_gap > 0.02"])
+                                   "--fail-if", "record_wise_gap > 0.02"])
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 1

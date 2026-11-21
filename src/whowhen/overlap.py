@@ -1,4 +1,5 @@
-"""Overlap check: does training on other rows of the test units inflate the score?
+"""Record-wise vs subject-wise validation: does training on other rows of
+the test units inflate the score?
 
 Each replicate scores the same test rows twice, with the same number of
 training rows of each class:
@@ -179,7 +180,7 @@ def _replicate(X, y, unit, time, b: int, seed: int, groups, random: bool,
     s_ov = fit_score(scorer, fit_seed, threads, X[ov], y[ov], X[tei])
     s_dj = fit_score(scorer, fit_seed, threads, X[dj], y[dj], X[tei])
     a_ov, a_dj = auc(y[tei], s_ov), auc(y[tei], s_dj)
-    return {"replicate": b, "auc_overlap": a_ov, "auc_disjoint": a_dj,
+    return {"replicate": b, "auc_record_wise": a_ov, "auc_subject_wise": a_dj,
             "gap": a_ov - a_dj, "n_test": int(len(tei)),
             "n_train": int(len(dj)), "n_test_units": int(len(np.unique(unit[tei]))),
             "leak_share_0": float(share[0]), "leak_share_1": float(share[1])}
@@ -187,11 +188,11 @@ def _replicate(X, y, unit, time, b: int, seed: int, groups, random: bool,
 
 @dataclass
 class OverlapResult:
-    """What the overlap check found.
+    """What record-wise vs subject-wise validation found.
 
     gap : mean over repeats of overlap AUC minus disjoint AUC.
     lo, hi : 2.5 and 97.5 percentiles of the per-replicate gap.
-    auc_overlap, auc_disjoint : mean AUC of each arm.
+    auc_record_wise, auc_subject_wise : mean AUC of each arm.
     repeats : repeats that produced a gap.
     scorer : the classifier that produced the numbers.
     per_replicate : one row per replicate.
@@ -200,8 +201,8 @@ class OverlapResult:
     gap: float
     lo: float
     hi: float
-    auc_overlap: float
-    auc_disjoint: float
+    auc_record_wise: float
+    auc_subject_wise: float
     repeats: int
     scorer: dict
     per_replicate: pd.DataFrame
@@ -209,8 +210,8 @@ class OverlapResult:
 
     def to_dict(self) -> dict:
         return {"gap": self.gap, "lo": self.lo, "hi": self.hi,
-                "auc_overlap": self.auc_overlap,
-                "auc_disjoint": self.auc_disjoint,
+                "auc_record_wise": self.auc_record_wise,
+                "auc_subject_wise": self.auc_subject_wise,
                 "repeats": self.repeats, "scorer": self.scorer,
                 "info": self.info,
                 "per_replicate": self.per_replicate.to_dict(orient="records")}
@@ -222,11 +223,11 @@ class OverlapResult:
                  "calendar": "rows after a cut in time are tested, earlier "
                              "rows are trained on",
                  }[self.info.get("time_split")]
-        return (f"overlap check ({self.repeats} repeats, "
-                f"split: {split}, scorer: {self.scorer['name']})\n"
-                f"  AUC overlap  {self.auc_overlap:.3f}\n"
-                f"  AUC disjoint {self.auc_disjoint:.3f}\n"
-                f"  gap          {self.gap:+.3f}  "
+        return (f"record-wise vs subject-wise validation ({self.repeats} "
+                f"repeats, split: {split}, scorer: {self.scorer['name']})\n"
+                f"  AUC record-wise  {self.auc_record_wise:.3f}\n"
+                f"  AUC subject-wise {self.auc_subject_wise:.3f}\n"
+                f"  gap              {self.gap:+.3f}  "
                 f"[{self.lo:+.3f}, {self.hi:+.3f}]"
                 + follow_up_note(self.info)
                 + ("\n  training rows from before the cut are used only "
@@ -276,7 +277,7 @@ def overlap_check(panel: Panel, features, *, model=None,
         the WHOWHEN_JOBS environment variable.
     """
     if not panel.event:
-        raise ValueError("the overlap check needs a panel with an event "
+        raise ValueError("record-wise vs subject-wise validation needs a panel with an event "
                          "column; pass event= to Panel")
     if time_split not in TIME_SPLITS:
         raise ValueError(f"time_split must be one of {TIME_SPLITS}; "
@@ -290,7 +291,7 @@ def overlap_check(panel: Panel, features, *, model=None,
     sc = resolve(model)
     frame = panel.frame(features, keep_event_units=True)
     if frame.n_units < 10:
-        raise ValueError(f"only {frame.n_units} units; the overlap check "
+        raise ValueError(f"only {frame.n_units} units; record-wise vs subject-wise validation "
                          f"needs many units")
     X, y, unit, time = frame.X, frame.y, frame.unit, frame.time
     settle, unfollowed = 0.0, None
@@ -330,7 +331,7 @@ def overlap_check(panel: Panel, features, *, model=None,
             "workers": workers}
     return OverlapResult(gap=float(per["gap"].mean()), lo=float(lo),
                          hi=float(hi),
-                         auc_overlap=float(per["auc_overlap"].mean()),
-                         auc_disjoint=float(per["auc_disjoint"].mean()),
+                         auc_record_wise=float(per["auc_record_wise"].mean()),
+                         auc_subject_wise=float(per["auc_subject_wise"].mean()),
                          repeats=len(per), scorer=sc.describe(),
                          per_replicate=per, info=info)

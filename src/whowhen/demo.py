@@ -1,14 +1,14 @@
-"""Both audits on a synthetic panel where the right answer is known.
+"""Both pair tests on a synthetic panel where the right answer is known.
 
 What is planted:
 
-  clock, drift   move with time. Readable by the timing audit only.
+  clock, drift   move with time. Readable by the time-order test only.
   sig0..sig2     a constant per unit plus noise. Readable by the
-                 identity audit only: flat in time, so they cannot order
+                 re-identification test only: flat in time, so they cannot order
                  two rows of one unit.
   noise0..noise2 independent draws. Readable by neither.
 
-Each audit must read its own columns well above 0.5 and the other
+Each test must read its own columns well above 0.5 and the other
 columns at 0.5. A feature set that misses is a defect in the library,
 not a finding.
 
@@ -29,11 +29,11 @@ NOISE = [f"noise{i}" for i in range(3)]
 CLOCKS = ["clock", "drift"]
 SETS = {"all": CLOCKS + SIG + NOISE, "clocks": CLOCKS,
         "signature": SIG, "noise": NOISE}
-# feature set -> does the audit have something to read?
-EXPECT = {"identity": {"all": True, "clocks": False, "signature": True,
-                       "noise": False},
-          "timing": {"all": True, "clocks": True, "signature": False,
-                     "noise": False}}
+# feature set -> does the test have something to read?
+EXPECT = {"reidentification": {"all": True, "clocks": False,
+                               "signature": True, "noise": False},
+          "time_order": {"all": True, "clocks": True, "signature": False,
+                         "noise": False}}
 SIGNAL_MIN = 0.60
 
 
@@ -59,7 +59,7 @@ def synthesize(n_units: int = 700, n_days: int = 120,
 
 
 def verdicts(result: AuditResult) -> list[tuple]:
-    """(audit, feature set, AUC, half-width, expected signal, ok).
+    """(test, feature set, AUC, half-width, expected signal, ok).
 
     A no-signal set passes when 0.5 lies within the interval's
     half-width of the mean; a signal set passes when it does not and
@@ -87,10 +87,10 @@ def run_demo(repeats: int = 3, quiet: bool = False, _scorer=None) -> bool:
     rows = verdicts(result)
     if not quiet:
         print(f"scorer: {result.scorer['name']}\n")
-        print(f"{'audit':10s}{'features':12s}{'AUC':>7s}{'+/-':>7s}"
+        print(f"{'test':18s}{'features':12s}{'AUC':>7s}{'+/-':>7s}"
               f"  planted    verdict")
         for kind, name, a, half, signal, ok in rows:
-            print(f"{kind:10s}{name:12s}{a:7.3f}{half:7.3f}  "
+            print(f"{kind:18s}{name:12s}{a:7.3f}{half:7.3f}  "
                   f"{'signal' if signal else 'none':9s}  "
                   f"{'ok' if ok else 'MISSED'}")
         print("\nall checks passed" if all(r[-1] for r in rows)

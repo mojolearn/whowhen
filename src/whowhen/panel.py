@@ -18,8 +18,8 @@ class Panel:
         Left out for a table whose rows are not ordered in time; the
         checks that need an order then cannot run.
     event : optional column; a unit with any nonzero value is left out of
-        the audits, so every audited row comes from a unit with no
-        recorded event. The overlap check uses it as the label.
+        the pair tests, so every row they use comes from a unit with no
+        recorded event. Record-wise vs subject-wise validation uses it as the label.
     """
 
     def __init__(self, df: pd.DataFrame, unit: str, time: str | None = None,
@@ -77,7 +77,7 @@ class Panel:
 
     def frame(self, columns: list[str],
               keep_event_units: bool = False) -> "Frame":
-        """Plain arrays for the audits. Rows stay sorted by (unit, time),
+        """Plain arrays for the checks. Rows stay sorted by (unit, time),
         or by unit alone when there is no time column."""
         missing = [c for c in columns if c not in self.df.columns]
         if missing:

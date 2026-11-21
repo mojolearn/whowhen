@@ -9,12 +9,13 @@ Leave --time out for a table whose rows are not ordered in time.
 To use a report in a script, name what counts as a failure:
 
     whowhen rows.parquet --unit u --time t --event e \\
-        --fail-if "overlap_gap > 0.02" --fail-if "clock_gain < 0.01"
+        --fail-if "record_wise_gap > 0.02" --fail-if "time_only_gain < 0.01"
 
 The command then exits with 1 if any condition holds, and with 2 if a
-condition names a check that did not run. The names are identity,
-identity_nearest, timing, placebo, overlap_gap, chronological_gap,
-time_cut_gap, clock and clock_gain.
+condition names a check that did not run. The names are
+reidentification, reidentification_nearest_neighbour, time_order,
+placebo, record_wise_gap, temporal_split_gap, out_of_time_gap,
+time_only and time_only_gain.
 """
 from __future__ import annotations
 
@@ -29,14 +30,15 @@ import pandas as pd
 from .report import report
 
 
-NAMES = ("identity", "identity_nearest", "timing", "placebo", "overlap_gap",
-         "chronological_gap", "time_cut_gap", "clock", "clock_gain")
+NAMES = ("reidentification", "reidentification_nearest_neighbour",
+         "time_order", "placebo", "record_wise_gap", "temporal_split_gap",
+         "out_of_time_gap", "time_only", "time_only_gain")
 OPS = {">": operator.gt, "<": operator.lt, ">=": operator.ge,
        "<=": operator.le}
 
 
 def parse_condition(text: str):
-    """('overlap_gap', '>', 0.02) from 'overlap_gap > 0.02'."""
+    """('record_wise_gap', '>', 0.02) from 'record_wise_gap > 0.02'."""
     m = re.fullmatch(r"\s*(\w+)\s*(>=|<=|>|<)\s*([-+]?[\d.]+(?:e-?\d+)?)\s*",
                      text)
     if not m or m.group(1) not in NAMES:

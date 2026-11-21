@@ -1,4 +1,4 @@
-"""Run the audits and report."""
+"""The re-identification, time-order and placebo tests on pairs of rows."""
 from __future__ import annotations
 
 import os
@@ -15,7 +15,7 @@ from ._stats import auc, bootstrap_auc
 from .panel import Frame, Panel
 from .scorers import Scorer, fit_score, resolve
 
-KINDS = ("identity", "timing", "placebo")
+KINDS = ("reidentification", "time_order", "placebo")
 
 
 def cores() -> int:
@@ -33,11 +33,11 @@ def n_workers(n_jobs: int | None, n_tasks: int) -> int:
 
 @dataclass
 class Draw:
-    """One pair draw and one unit split for one (audit, seed).
+    """One pair draw and one unit split for one (test, seed).
 
     Every feature set fitted on a Draw sees the same pairs and the same
     held-out units, so differences between sets are not pair noise.
-    rows_a, rows_b : the two rows of each identity pair; for timing,
+    rows_a, rows_b : the two rows of each re-identification pair; for time order,
         rows_a holds the single rows and rows_b is None.
     roles : held-out rows' unit codes (0..n_test_units-1), one array per
         unit role, for the cluster bootstrap.
@@ -72,12 +72,12 @@ def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
     rng = np.random.default_rng(seed + k)
     train = P.split_units(frame, k, frame.repeats,
                           rng if frame.random else None)
-    if kind == "identity":
-        ra, rb, y, tr = P.identity_pairs(frame, lo, hi, n_pairs,
+    if kind == "reidentification":
+        ra, rb, y, tr = P.reidentification_pairs(frame, lo, hi, n_pairs,
                                          max_per_unit, rng, train, mode)
         roles_all = [frame.unit[ra], frame.unit[rb]]
     else:
-        ra, y = P.timing_pairs(frame, lo, hi, n_pairs, max_per_unit, rng,
+        ra, y = P.time_order_pairs(frame, lo, hi, n_pairs, max_per_unit, rng,
                                placebo=(kind == "placebo"))
         rb = None
         tr = train[frame.unit[ra]]
@@ -85,7 +85,7 @@ def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
     te = ~tr
     if tr.sum() < 20 or te.sum() < 20:
         raise ValueError(
-            f"the {kind} audit drew {int(tr.sum())} training and "
+            f"the {kind} test drew {int(tr.sum())} training and "
             f"{int(te.sum())} held-out rows; too few units have two rows"
             + (" this offset apart" if frame.time is not None else ""))
     codes, inv = np.unique(np.concatenate([r[te] for r in roles_all]),
@@ -113,7 +113,7 @@ def _one_seed(frame: Frame, kind: str, mode: str, k: int, seed: int,
     d = draw(frame, kind, mode, k, seed, lo, hi, n_pairs, max_per_unit)
     brng = np.random.default_rng(seed + 7 + 1000 * k)
     yte = d.y[~d.tr]
-    out = {"kind": kind, "impostors": mode, "k": k,
+    out = {"kind": kind, "controls": mode, "k": k,
            "n_train": int(d.tr.sum()), "n_test": int((~d.tr).sum()),
            "n_test_units": d.n_test_units, "sets": {}}
     for name, cols in sets.items():
@@ -127,20 +127,20 @@ def _one_seed(frame: Frame, kind: str, mode: str, k: int, seed: int,
 
 @dataclass
 class AuditResult:
-    """What the audits found.
+    """What the pair tests found.
 
-    identity, timing, placebo : one row per feature set, with the mean
+    reidentification, time_order, placebo : one row per feature set, with the mean
         AUC over repeats, a 95 percent interval (unit-cluster bootstrap
         pooled over repeats, so it reflects both which pairs were drawn
         and which units were held out) and the range over repeats. None
-        for an audit that was not run.
+        for a test that was not run.
     scorer : the classifier that produced the numbers.
-    info : what was audited (unit counts, offset, pair counts, repeats).
+    info : what was checked (unit counts, offset, pair counts, repeats).
     """
     scorer: dict
     info: dict
-    identity: pd.DataFrame | None = None
-    timing: pd.DataFrame | None = None
+    reidentification: pd.DataFrame | None = None
+    time_order: pd.DataFrame | None = None
     placebo: pd.DataFrame | None = None
     tables: dict = field(default_factory=dict, repr=False)
 
@@ -167,15 +167,15 @@ def _table(runs: list[dict], kind: str) -> pd.DataFrame | None:
     if not runs:
         return None
     rows = []
-    for mode in dict.fromkeys(r["impostors"] for r in runs):
-        sub = [r for r in runs if r["impostors"] == mode]
+    for mode in dict.fromkeys(r["controls"] for r in runs):
+        sub = [r for r in runs if r["controls"] == mode]
         for name in sub[0]["sets"]:
             aucs = [r["sets"][name]["auc"] for r in sub]
             boot = np.concatenate([r["sets"][name]["boot"] for r in sub])
             lo, hi = np.percentile(boot, [2.5, 97.5])
             row = {"features": name}
-            if kind == "identity":
-                row["impostors"] = mode
+            if kind == "reidentification":
+                row["controls"] = mode
             row.update(auc=float(np.mean(aucs)), lo=float(lo), hi=float(hi),
                        lowest_run=float(np.min(aucs)),
                        highest_run=float(np.max(aucs)),
@@ -195,22 +195,22 @@ def _feature_sets(features) -> dict:
 
 
 def pair_gap(panel: Panel, offset, which) -> tuple:
-    """(audits to run, min gap, max gap), the gaps in the time column's
-    scale. Without a time column only the identity audit can run and
+    """(tests to run, min gap, max gap), the gaps in the time column's
+    scale. Without a time column only the re-identification test can run and
     its pairs have no gap."""
     if panel.time is None:
-        which = ("identity",) if which is None else which
+        which = ("reidentification",) if which is None else which
         which = (which,) if isinstance(which, str) else tuple(which)
-        late = [w for w in which if w != "identity"]
+        late = [w for w in which if w != "reidentification"]
         if late:
-            raise ValueError(f"the {' and '.join(late)} audit needs a "
+            raise ValueError(f"the {' and '.join(late)} test needs a "
                              f"time column")
         return which, 0.0, 0.0
-    which = ("identity", "timing") if which is None else which
+    which = ("reidentification", "time_order") if which is None else which
     which = (which,) if isinstance(which, str) else tuple(which)
     bad = [w for w in which if w not in KINDS]
     if bad:
-        raise ValueError(f"unknown audit {bad}; choose from {KINDS}")
+        raise ValueError(f"unknown test {bad}; choose from {KINDS}")
     lo, hi = panel.offset(offset[0]), panel.offset(offset[1])
     if not 0 < lo <= hi:
         raise ValueError("offset needs 0 < min <= max")
@@ -218,29 +218,30 @@ def pair_gap(panel: Panel, offset, which) -> tuple:
 
 
 def audit(panel: Panel, features, offset=None, *, scorer=None,
-          which=None, impostors="random",
+          which=None, controls="random",
           n_pairs: int = 20000,
           max_pairs_per_unit: int = 20, repeats: int = 4,
           bootstrap: int = 2000, random: bool = False,
           seed: int | None = None,
           n_jobs: int | None = None) -> AuditResult:
-    """Audit a panel for identity and timing signal.
+    """Re-identification, time-order and placebo tests on a panel.
 
     Parameters
     ----------
     panel : a ``Panel``.
     features : a list of columns, or a dict of named column lists to
-        audit side by side on the same pairs (for example with and
+        test side by side on the same pairs (for example with and
         without a clock column, or before and after imputation).
     offset : (min, max) gap between the two rows of a pair, in the time
         column's scale; strings such as ("6h", "24h") for datetimes.
         Not used when the panel has no time column.
     scorer : None for the default, 'mojolearn', 'catboost', an estimator
         with fit and predict_proba, or a function from a seed to one.
-    which : any of 'identity', 'timing', 'placebo'. Default: identity
-        and timing, or identity alone when the panel has no time column.
-    impostors : 'random', 'nearest', or both in a tuple. See
-        ``whowhen.pairs.identity_pairs``.
+    which : any of 'reidentification', 'time_order', 'placebo'. Default:
+        reidentification and time_order, or reidentification alone when
+        the panel has no time column.
+    controls : 'random', 'nearest_neighbour', or both in a tuple. See
+        ``whowhen.pairs.reidentification_pairs``.
     n_pairs, max_pairs_per_unit : how many pairs to draw, and how many
         one unit may contribute.
     repeats : how many times to repeat. Units fall into repeats + 1
@@ -257,7 +258,7 @@ def audit(panel: Panel, features, offset=None, *, scorer=None,
     """
     sets = _feature_sets(features)
     which, lo, hi = pair_gap(panel, offset, which)
-    modes = (impostors,) if isinstance(impostors, str) else tuple(impostors)
+    modes = (controls,) if isinstance(controls, str) else tuple(controls)
     seed = pick_seed(seed, random)
     sc = resolve(scorer)
     columns = list(dict.fromkeys(c for v in sets.values() for c in v))
@@ -265,10 +266,10 @@ def audit(panel: Panel, features, offset=None, *, scorer=None,
     frame.repeats, frame.random = repeats, random
     if frame.n_units < 10:
         raise ValueError(f"only {frame.n_units} units without an event; "
-                         f"the audits need many units")
+                         f"the pair tests need many units")
     col_sets = {name: frame.cols(v) for name, v in sets.items()}
     tasks = [(kind, mode, k) for kind in which
-             for mode in (modes if kind == "identity" else ("random",))
+             for mode in (modes if kind == "reidentification" else ("random",))
              for k in range(repeats)]
     workers = n_workers(n_jobs, len(tasks))
     threads = max(1, cores() // workers)
@@ -279,7 +280,7 @@ def audit(panel: Panel, features, offset=None, *, scorer=None,
         for kind, mode, k in tasks)
     info = {"n_units": frame.n_units_all,
             "n_units_without_event": frame.n_units,
-            "n_rows_audited": int(len(frame.unit)),
+            "n_rows_checked": int(len(frame.unit)),
             "offset": (None if panel.time is None
                        else [str(offset[0]), str(offset[1])]),
             "repeats": repeats, "bootstrap": bootstrap, "seed": seed, "random": random,

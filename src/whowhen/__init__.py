@@ -1,4 +1,4 @@
-"""whowhen: audit a table of repeated observations for identity and timing signal.
+"""whowhen: check a table of repeated observations for re-identification and time-order signal.
 
     import whowhen as ww
     print(ww.report(df, unit="patient_id", time="hour", event="sepsis"))

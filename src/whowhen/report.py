@@ -20,79 +20,83 @@ from .overlap import OverlapResult, overlap_check
 from .panel import Panel
 from .scorers import resolve
 
-PARTS = ("audit", "gaps", "columns", "overlap", "chronological", "time_cut",
-         "clock")
+PARTS = ("pair_tests", "by_gap", "importance", "record_wise", "temporal_split",
+         "out_of_time", "time_only")
+
+
+TITLES = {"reidentification": "re-identification test",
+          "time_order": "time-order test"}
 
 
 @dataclass
 class Report:
     """Results of ``report``. A part that did not run is None and its
     reason is in ``skipped``. The four checks that need an event column
-    (overlap, chronological, time_cut, clock) hold one result per
+    (record_wise, temporal_split, out_of_time, time_only) hold one result per
     feature set, keyed by the set's name ("all" when the columns were
     not given as named sets)."""
     scorer: dict
     info: dict
-    audit: AuditResult | None = None
-    gaps: pd.DataFrame | None = None
-    columns: dict | None = None
-    overlap: dict[str, OverlapResult] | None = None
-    chronological: dict[str, OverlapResult] | None = None
-    time_cut: dict[str, OverlapResult] | None = None
-    clock: dict[str, ClockResult] | None = None
+    pair_tests: AuditResult | None = None
+    by_gap: pd.DataFrame | None = None
+    importance: dict | None = None
+    record_wise: dict[str, OverlapResult] | None = None
+    temporal_split: dict[str, OverlapResult] | None = None
+    out_of_time: dict[str, OverlapResult] | None = None
+    time_only: dict[str, ClockResult] | None = None
     skipped: dict = field(default_factory=dict)
 
     def headline(self) -> dict:
         """One number per check, for scripts. With several feature sets
         each number is the one furthest from a clean result: the highest
-        AUC, the highest gap, and the lowest clock gain. A check that
+        AUC, the highest gap, and the lowest gain over time alone. A check that
         did not run has no entry."""
         h = {}
-        if self.audit is not None:
-            t = self.audit.identity
+        if self.pair_tests is not None:
+            t = self.pair_tests.reidentification
             if t is not None:
-                for mode, name in (("random", "identity"),
-                                   ("nearest", "identity_nearest")):
-                    sub = t[t["impostors"] == mode]
+                for mode, name in (("random", "reidentification"),
+                                   ("nearest_neighbour", "reidentification_nearest_neighbour")):
+                    sub = t[t["controls"] == mode]
                     if len(sub):
                         h[name] = float(sub["auc"].max())
-            for kind in ("timing", "placebo"):
-                t = getattr(self.audit, kind)
+            for kind in ("time_order", "placebo"):
+                t = getattr(self.pair_tests, kind)
                 if t is not None:
                     h[kind] = float(t["auc"].max())
-        for part, name in (("overlap", "overlap_gap"),
-                           ("chronological", "chronological_gap"),
-                           ("time_cut", "time_cut_gap")):
+        for part, name in (("record_wise", "record_wise_gap"),
+                           ("temporal_split", "temporal_split_gap"),
+                           ("out_of_time", "out_of_time_gap")):
             r = getattr(self, part)
             if r:
                 h[name] = max(float(x.gap) for x in r.values())
-        if self.clock:
-            h["clock"] = max(
-                float(x.table.set_index("input")["auc"]["clock"])
-                for x in self.clock.values())
-            h["clock_gain"] = min(float(x.gain) for x in self.clock.values())
+        if self.time_only:
+            h["time_only"] = max(
+                float(x.table.set_index("input")["auc"]["time"])
+                for x in self.time_only.values())
+            h["time_only_gain"] = min(float(x.gain) for x in self.time_only.values())
         return h
 
     def to_dict(self) -> dict:
         d = {"scorer": self.scorer, "info": self.info,
              "skipped": self.skipped, "headline": self.headline()}
-        for part in ("audit", "overlap", "chronological", "time_cut",
-                     "clock"):
+        for part in ("pair_tests", "record_wise", "temporal_split", "out_of_time",
+                     "time_only"):
             r = getattr(self, part)
             if r is not None:
-                d[part] = (r.to_dict() if part == "audit" else
+                d[part] = (r.to_dict() if part == "pair_tests" else
                            {k: x.to_dict() for k, x in r.items()})
-        if self.gaps is not None:
-            d["gaps"] = self.gaps.to_dict(orient="records")
-        if self.columns is not None:
-            d["columns"] = {k: t.to_dict(orient="records")
-                            for k, t in self.columns.items()}
+        if self.by_gap is not None:
+            d["by_gap"] = self.by_gap.to_dict(orient="records")
+        if self.importance is not None:
+            d["importance"] = {k: t.to_dict(orient="records")
+                            for k, t in self.importance.items()}
         return d
 
     def __repr__(self) -> str:
         i = self.info
         out = [f"whowhen report: {i['n_units']:,} units, "
-               f"{len(i['features'])} columns audited, {i['repeats']} "
+               f"{len(i['features'])} columns checked, {i['repeats']} "
                f"repeats{' (random, seed ' + str(i['seed']) + ')' if i['random'] else ''}"]
         if i["offset"]:
             out.append(f"rows of a pair are {i['offset'][0]} to "
@@ -107,28 +111,28 @@ class Report:
         out.append(f"scorer: {self.scorer['name']}"
                    + (f" {p['version']}" if "version" in p else "")
                    + (f" (doi:{p['doi']})" if "doi" in p else ""))
-        if self.audit is not None:
-            for kind in ("identity", "timing"):
-                t = getattr(self.audit, kind)
+        if self.pair_tests is not None:
+            for kind, title in TITLES.items():
+                t = getattr(self.pair_tests, kind)
                 if t is not None:
-                    out += ["", f"{kind} audit (AUC; 0.5 = no signal)",
+                    out += ["", f"{title} (AUC; 0.5 = no signal)",
                             t.round(3).to_string(index=False)]
-            t = self.audit.placebo
+            t = self.pair_tests.placebo
             if t is not None:
-                out += ["", "timing placebo (the later row is taken from a "
-                        "different unit)",
+                out += ["", "placebo test: the time-order test with the "
+                        "later row taken from a different unit",
                         t.round(3).to_string(index=False),
-                        "near 0.5: the timing signal is each unit's own. "
-                        "near the timing audit: it is change shared by all "
-                        "units."]
-        if self.gaps is not None:
-            out += ["", "the audits by how far apart the two rows are",
-                    self.gaps.round(3).to_string(index=False)]
-        if self.columns is not None:
-            for kind, t in self.columns.items():
-                out += ["", f"columns by {kind} signal",
+                        "near 0.5: the time-order signal is each unit's "
+                        "own. near the time-order test: it is change shared "
+                        "by all units."]
+        if self.by_gap is not None:
+            out += ["", "results by time gap between the two rows",
+                    self.by_gap.round(3).to_string(index=False)]
+        if self.importance is not None:
+            for kind, t in self.importance.items():
+                out += ["", f"column importance, {TITLES[kind]}",
                         t.head(10).round(3).to_string(index=False)]
-        for part in ("overlap", "chronological", "time_cut", "clock"):
+        for part in ("record_wise", "temporal_split", "out_of_time", "time_only"):
             r = getattr(self, part)
             for name, x in (r or {}).items():
                 out += [""] + ([f"columns: {name}"] if len(r) > 1 else [])
@@ -140,7 +144,7 @@ class Report:
 
 
 NO_TIME = "no time column was given"
-NEEDS_TIME = ("gaps", "chronological", "time_cut", "clock")
+NEEDS_TIME = ("by_gap", "temporal_split", "out_of_time", "time_only")
 
 
 def report(df: pd.DataFrame, unit: str, time: str | None = None,
@@ -156,21 +160,22 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
     df : one row per observation.
     unit : the column naming the unit (patient, machine, loan, vessel).
     time : optional column giving when the row was observed. Leave it
-        out for a table whose rows are not ordered in time. The identity
-        audit, the column importance and the overlap check still run;
-        the timing audit and the checks that split by time do not.
+        out for a table whose rows are not ordered in time. The
+        re-identification test, the column importance and record-wise
+        vs subject-wise validation still run; the time-order test and
+        the checks that split by time do not.
     event : optional column, nonzero where the event happens. Without
-        it the overlap check, the chronological control and the clock
-        baseline are left out.
+        it record-wise vs subject-wise validation, the temporal split,
+        out-of-time validation and the time-only baseline are left out.
     features : optional. The columns to check: a list, or a dict of
         named lists to check side by side (for example
-        {"raw": [...], "filled": [...]}, or with and without a clock
-        column). The audits score each named set on the same pairs, and
+        {"raw": [...], "filled": [...]}, or with and without a time
+        column). The pair tests score each named set on the same pairs, and
         each check that needs an event column runs once per set.
         Default: every numeric column other than unit, time and event.
     importance : False by default. True ranks every checked column by
         single-column AUC and drop-column importance; a list ranks only
-        those columns. Each ranked column costs two model fits per audit
+        those columns. Each ranked column costs two model fits per test
         and repeat, so this is the slowest part on a wide table.
     horizon : optional. With it the event checks forecast: "does the
         event come within this long after the row?", in the time
@@ -186,8 +191,8 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
     random : False by default, so the same call gives the same numbers
         every time. True draws held-out units and pairs at random,
         differently on each run, and records the seed it used.
-    n_pairs : the most row pairs each audit run is trained and tested
-        on. Smaller tables use as many as they have.
+    n_pairs : the most row pairs each pair-test run is trained and
+        tested on. Smaller tables use as many as they have.
 
     The gap between the two rows of a pair is chosen from the data and stated in the
     report. A check that cannot run is listed under "not run" with the
@@ -233,7 +238,7 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
         except ValueError as e:
             no_pairs = str(e)
     def gaps():
-        """The audits on the shorter and the longer half of the gap range."""
+        """The pair tests on the shorter and the longer half of the gap range."""
         lo, hi = offset
         if not lo < hi:
             raise ValueError("every pair of rows is the same gap apart")
@@ -242,14 +247,14 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
         for name, (a, b) in (("short", (lo, mid)), ("long", (mid, hi))):
             r = audit(panel, features, (a, b), scorer=sc, n_pairs=n_pairs,
                       **common)
-            for kind in ("identity", "timing"):
-                t = getattr(r, kind).drop(columns="impostors",
+            for kind in ("reidentification", "time_order"):
+                t = getattr(r, kind).drop(columns="controls",
                                           errors="ignore")
-                t.insert(0, "audit", kind)
+                t.insert(0, "test", kind)
                 t.insert(1, "gap", f"{name}: {a} to {b}")
                 out.append(t)
         return pd.concat(out, ignore_index=True).sort_values(
-            ["audit", "features"], kind="stable", ignore_index=True)
+            ["test", "features"], kind="stable", ignore_index=True)
 
     def per_set(check, **kw):
         """One result per named feature set. The sets run one after
@@ -258,34 +263,34 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
                 for name, cols in sets.items()}
 
     steps = {
-        "gaps": gaps,
-        "time_cut": lambda: per_set(overlap_check, time_split="calendar"),
-        "audit": lambda: audit(panel, features, offset, scorer=sc,
+        "by_gap": gaps,
+        "out_of_time": lambda: per_set(overlap_check, time_split="calendar"),
+        "pair_tests": lambda: audit(panel, features, offset, scorer=sc,
                                n_pairs=n_pairs,
-                               which=(("identity", "timing", "placebo")
-                                      if time else ("identity",)),
-                               impostors=("random", "nearest"), **common),
-        "columns": lambda: rank_columns(panel, flat, offset,
+                               which=(("reidentification", "time_order", "placebo")
+                                      if time else ("reidentification",)),
+                               controls=("random", "nearest_neighbour"), **common),
+        "importance": lambda: rank_columns(panel, flat, offset,
                                         rank=None if importance is True
                                         else importance, scorer=sc,
                                         n_pairs=n_pairs, **common),
-        "overlap": lambda: per_set(overlap_check),
-        "chronological": lambda: per_set(overlap_check,
+        "record_wise": lambda: per_set(overlap_check),
+        "temporal_split": lambda: per_set(overlap_check,
                                          time_split="chronological"),
-        "clock": lambda: per_set(clock_baseline),
+        "time_only": lambda: per_set(clock_baseline),
     }
     for part in PARTS:
-        if part == "columns" and importance is False:
+        if part == "importance" and importance is False:
             rep.skipped[part] = ("off by default; importance=True ranks "
                                  "every column, or give a list")
         elif time is None and part in NEEDS_TIME:
             rep.skipped[part] = NO_TIME
-        elif part in ("audit", "gaps", "columns") and no_pairs:
+        elif part in ("pair_tests", "by_gap", "importance") and no_pairs:
             rep.skipped[part] = no_pairs
-        elif (part in ("overlap", "chronological", "time_cut", "clock")
+        elif (part in ("record_wise", "temporal_split", "out_of_time", "time_only")
               and not event):
             rep.skipped[part] = "no event column was given"
-        elif (part in ("overlap", "chronological", "time_cut", "clock")
+        elif (part in ("record_wise", "temporal_split", "out_of_time", "time_only")
               and not (panel.df[event].fillna(0) != 0).any()):
             rep.skipped[part] = f"no row of {event!r} marks an event"
         else:

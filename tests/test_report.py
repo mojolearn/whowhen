@@ -1,4 +1,4 @@
-"""Forecast horizon, chronological control, clock baseline, one call."""
+"""Forecast horizon, temporal split, time-only baseline, one call."""
 import numpy as np
 import pandas as pd
 import pytest
@@ -54,13 +54,13 @@ def test_chronological_masks():
     assert time[te].min() > time[leak].max()
 
 
-def test_clock_baseline_sees_the_clock(fast_scorer):
+def test_time_only_baseline_sees_elapsed_time(fast_scorer):
     p = Panel(event_table(), "unit", "time", event="event")
     r = clock_baseline(p, ["level", "noise"], horizon=12, model=fast_scorer,
                        repeats=6)
     t = r.table.set_index("input")["auc"]
-    assert t["clock"] > 0.65
-    assert t["features + clock"] > t["clock"]
+    assert t["time"] > 0.65
+    assert t["features + time"] > t["time"]
     assert r.gain > 0
 
 
@@ -70,26 +70,27 @@ def test_report_runs_everything(fast_scorer):
                   importance=True, _scorer=fast_scorer)
     assert r.info["features"] == ["level", "noise"]
     assert r.info["offset"] and not r.skipped, r.skipped
-    for part in ("audit", "gaps", "columns", "overlap", "chronological",
-                 "time_cut", "clock"):
+    for part in ("pair_tests", "by_gap", "importance", "record_wise", "temporal_split",
+                 "out_of_time", "time_only"):
         assert getattr(r, part) is not None
-    assert set(r.gaps["audit"]) == {"identity", "timing"}
-    assert len(r.gaps) == 4 and r.gaps["gap"].str.startswith("short").sum() == 2
-    assert set(r.audit.identity["impostors"]) == {"random", "nearest"}
-    assert r.audit.placebo is not None and "timing placebo" in repr(r)
-    assert "clock baseline" in repr(r) and "identity audit" in repr(r)
-    assert set(r.to_dict()) >= {"audit", "gaps", "columns", "overlap",
-                                "time_cut", "clock"}
+    assert set(r.by_gap["test"]) == {"reidentification", "time_order"}
+    assert len(r.by_gap) == 4 and r.by_gap["gap"].str.startswith("short").sum() == 2
+    assert set(r.pair_tests.reidentification["controls"]) == {"random", "nearest_neighbour"}
+    assert r.pair_tests.placebo is not None and "placebo test" in repr(r)
+    assert "time-only baseline" in repr(r)
+    assert "re-identification test" in repr(r)
+    assert set(r.to_dict()) >= {"pair_tests", "by_gap", "importance", "record_wise",
+                                "out_of_time", "time_only"}
 
 
 def test_report_without_event(fast_scorer):
     df = event_table().drop(columns="event")
     r = ww.report(df, unit="unit", time="time", repeats=1, n_pairs=800,
                   _scorer=fast_scorer)
-    assert r.audit is not None and r.columns is None
-    assert set(r.skipped) == {"columns", "overlap", "chronological",
-                              "time_cut", "clock"}
-    assert "off by default" in r.skipped["columns"]
+    assert r.pair_tests is not None and r.importance is None
+    assert set(r.skipped) == {"importance", "record_wise", "temporal_split",
+                              "out_of_time", "time_only"}
+    assert "off by default" in r.skipped["importance"]
     assert "no event column" in repr(r)
 
 
@@ -99,18 +100,18 @@ def test_report_on_chosen_columns(fast_scorer):
                   importance=True, repeats=1, n_pairs=600,
                   _scorer=fast_scorer)
     assert r.info["features"] == ["level"]
-    assert list(r.columns["identity"]["column"]) == ["level"]
+    assert list(r.importance["reidentification"]["column"]) == ["level"]
     # a list ranks only the named columns
     r = ww.report(df, unit="unit", time="time", importance=["noise"],
                   repeats=1, n_pairs=600, _scorer=fast_scorer)
-    t = r.columns["identity"]
+    t = r.importance["reidentification"]
     assert list(t["column"]) == ["noise"]
     with pytest.raises(ValueError, match="not checked"):
         ww.report(df, unit="unit", time="time", importance=["nope"])
     r = ww.report(df, unit="unit", time="time", repeats=1, n_pairs=600,
                   features={"a": ["level"], "b": ["level", "noise"]},
                   _scorer=fast_scorer)
-    assert set(r.audit.timing["features"]) == {"a", "b"}
+    assert set(r.pair_tests.time_order["features"]) == {"a", "b"}
     assert r.info["features"] == ["level", "noise"]
 
 
@@ -154,9 +155,9 @@ def ageing_table(shared_start, n=300, m=30, seed=0):
 def test_placebo_separates_own_change_from_shared_change(fast_scorer):
     def run(shared):
         r = audit(Panel(ageing_table(shared), "unit", "time"), ["age"],
-                  (1, 10), which=("timing", "placebo"), repeats=2,
+                  (1, 10), which=("time_order", "placebo"), repeats=2,
                   n_pairs=3000, scorer=fast_scorer)
-        return r.timing["auc"][0], r.placebo["auc"][0]
+        return r.time_order["auc"][0], r.placebo["auc"][0]
     timing, placebo = run(shared=False)
     assert timing > 0.58 and placebo < 0.56
     timing, placebo = run(shared=True)
@@ -172,27 +173,27 @@ def test_whole_report_is_the_same_every_time(fast_scorer):
                          _scorer=fast_scorer).to_dict()
     a, b = run(), run()
     assert not a["skipped"], a["skipped"]
-    assert set(a) >= {"audit", "gaps", "columns", "overlap", "chronological",
-                      "time_cut", "clock"}
-    assert "placebo" in a["audit"]
+    assert set(a) >= {"pair_tests", "by_gap", "importance", "record_wise", "temporal_split",
+                      "out_of_time", "time_only"}
+    assert "placebo" in a["pair_tests"]
     assert a == b
     assert set(a["headline"]) == {
-        "identity", "identity_nearest", "timing", "placebo", "overlap_gap",
-        "chronological_gap", "time_cut_gap", "clock", "clock_gain"}
+        "reidentification", "reidentification_nearest_neighbour", "time_order", "placebo", "record_wise_gap",
+        "temporal_split_gap", "out_of_time_gap", "time_only", "time_only_gain"}
 
 
 def test_fail_if_conditions():
     from whowhen.cli import check, parse_condition
-    assert parse_condition("overlap_gap > 0.02") == ("overlap_gap", ">", 0.02)
-    assert parse_condition("clock_gain<=-0.5") == ("clock_gain", "<=", -0.5)
-    for bad in ("overlap_gap", "nonsense > 1", "identity == 0.5"):
+    assert parse_condition("record_wise_gap > 0.02") == ("record_wise_gap", ">", 0.02)
+    assert parse_condition("time_only_gain<=-0.5") == ("time_only_gain", "<=", -0.5)
+    for bad in ("record_wise_gap", "nonsense > 1", "identity == 0.5"):
         with pytest.raises(ValueError):
             parse_condition(bad)
-    numbers = {"overlap_gap": 0.031, "identity": 0.97}
-    held, missing = check(["overlap_gap > 0.02", "identity > 0.99",
-                           "clock_gain < 0.01"], numbers)
-    assert len(held) == 1 and held[0].startswith("overlap_gap is 0.031")
-    assert missing == ["clock_gain: this check did not run"]
+    numbers = {"record_wise_gap": 0.031, "reidentification": 0.97}
+    held, missing = check(["record_wise_gap > 0.02", "reidentification > 0.99",
+                           "time_only_gain < 0.01"], numbers)
+    assert len(held) == 1 and held[0].startswith("record_wise_gap is 0.031")
+    assert missing == ["time_only_gain: this check did not run"]
 
 
 def test_report_names_the_software_that_ran(fast_scorer):
@@ -250,7 +251,7 @@ def recognisable_units(n_units=400, n_t=40, seed=0):
     return df[t <= onset[u]]
 
 
-def test_unsettled_labels_would_inflate_the_chronological_gap():
+def test_unsettled_labels_would_inflate_the_temporal_split_gap():
     """A training row whose horizon runs past the cut carries the
     answer for the test rows of the same unit. Planted here: units are
     recognisable and the columns say nothing else about the event."""
@@ -283,18 +284,18 @@ def test_each_named_set_gets_its_own_event_checks(fast_scorer):
                   event="event",
                   features={"signal": ["level"], "junk": ["noise"]},
                   horizon=12, repeats=2, n_pairs=800, _scorer=fast_scorer)
-    assert set(r.skipped) == {"columns"}, r.skipped
-    for part in ("overlap", "chronological", "time_cut", "clock"):
+    assert set(r.skipped) == {"importance"}, r.skipped
+    for part in ("record_wise", "temporal_split", "out_of_time", "time_only"):
         got = getattr(r, part)
         assert list(got) == ["signal", "junk"]
         assert got["signal"].info["features"] == ["level"]
         assert got["junk"].info["features"] == ["noise"]
         assert set(r.to_dict()[part]) == {"signal", "junk"}
     assert "columns: signal" in repr(r) and "columns: junk" in repr(r)
-    gain = {k: v.gain for k, v in r.clock.items()}
+    gain = {k: v.gain for k, v in r.time_only.items()}
     assert gain["signal"] > gain["junk"]
-    assert r.headline()["clock_gain"] == min(gain.values())
-    assert r.overlap["signal"].info["rows_without_follow_up"] > 0
+    assert r.headline()["time_only_gain"] == min(gain.values())
+    assert r.record_wise["signal"].info["rows_without_follow_up"] > 0
     assert "rows left out" in repr(r)
     assert "only if their horizon has passed" in repr(r)
 
@@ -305,7 +306,7 @@ def test_time_cut_says_when_no_label_is_known_by_the_cut(fast_scorer):
     r = ww.report(event_table(), unit="unit", time="time", event="event",
                   features=["level"], horizon=12, repeats=2, n_pairs=600,
                   _scorer=fast_scorer)
-    assert "known by the cut" in r.skipped["time_cut"]
+    assert "known by the cut" in r.skipped["out_of_time"]
 
 
 def untimed_table(n_units=300, rows=12, seed=0):
@@ -328,8 +329,8 @@ def test_pairs_without_time_respect_unit_and_split():
     f = panel.frame(["trait", "noise"])
     assert f.time is None
     train = pairs.split_units(f, 0, 4)
-    for mode in ("random", "nearest"):
-        ra, rb, lab, tr = pairs.identity_pairs(
+    for mode in ("random", "nearest_neighbour"):
+        ra, rb, lab, tr = pairs.reidentification_pairs(
             f, 0.0, 0.0, 800, 2, np.random.default_rng(0), train, mode)
         assert (ra != rb).all() and (lab == 1).sum() and (lab == 0).sum()
         assert ((f.unit[ra] == f.unit[rb]) == (lab == 1)).all()
@@ -342,27 +343,27 @@ def test_report_without_time(fast_scorer):
     r = ww.report(df.drop(columns="event"), unit="unit",
                   features={"trait": ["trait"], "noise": ["noise"]},
                   importance=True, repeats=2, n_pairs=3000, _scorer=fast_scorer)
-    t = r.audit.identity
+    t = r.pair_tests.reidentification
     auc = lambda name, mode="random": float(
-        t[(t["features"] == name) & (t["impostors"] == mode)]["auc"].iloc[0])
+        t[(t["features"] == name) & (t["controls"] == mode)]["auc"].iloc[0])
     assert auc("trait") > 0.75
     # against units with nearly the same trait, the trait says little
-    assert auc("trait", "nearest") < auc("trait") - 0.15
+    assert auc("trait", "nearest_neighbour") < auc("trait") - 0.15
     assert abs(auc("noise") - 0.5) < 0.06
-    assert abs(auc("noise", "nearest") - 0.5) < 0.06
-    assert r.audit.timing is None and r.audit.placebo is None
-    assert list(r.columns) == ["identity"]
+    assert abs(auc("noise", "nearest_neighbour") - 0.5) < 0.06
+    assert r.pair_tests.time_order is None and r.pair_tests.placebo is None
+    assert list(r.importance) == ["reidentification"]
     assert r.info["offset"] is None and r.info["time"] is None
     assert {k for k, v in r.skipped.items()
             if v.startswith("no time column")} == {
-        "gaps", "chronological", "time_cut", "clock"}
+        "by_gap", "temporal_split", "out_of_time", "time_only"}
     assert "no time column: a pair is" in repr(r)
-    assert set(r.headline()) == {"identity", "identity_nearest"}
+    assert set(r.headline()) == {"reidentification", "reidentification_nearest_neighbour"}
     # with an event column the overlap check runs too
     r = ww.report(df, unit="unit", event="event", features=["trait"],
                   repeats=2, n_pairs=1500, _scorer=fast_scorer)
-    assert r.overlap is not None and "overlap_gap" in r.headline()
-    assert r.chronological is None and r.clock is None
+    assert r.record_wise is not None and "record_wise_gap" in r.headline()
+    assert r.temporal_split is None and r.time_only is None
 
 
 def test_horizon_without_time_is_an_error():

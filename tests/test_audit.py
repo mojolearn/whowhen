@@ -29,13 +29,13 @@ def test_each_audit_reads_only_its_own_signal(panel, fast_scorer):
 
 def test_default_scorer_is_recorded(panel, default_scorer_runs):
     r = audit(panel, {"signature": demo.SIG, "noise": demo.NOISE},
-                 offset=("30D", "90D"), which="identity", n_pairs=1500,
+                 offset=("30D", "90D"), which="reidentification", n_pairs=1500,
                  max_pairs_per_unit=4, repeats=1, bootstrap=100, n_jobs=1)
     assert r.scorer == resolve(None).describe()
-    t = r.identity.set_index("features")
+    t = r.reidentification.set_index("features")
     assert t.loc["signature", "auc"] > 0.6
     assert abs(t.loc["noise", "auc"] - 0.5) < 0.06
-    assert r.timing is None
+    assert r.time_order is None
 
 
 def test_scorer_factory_and_names(panel):
@@ -52,11 +52,11 @@ def test_pairs_respect_unit_offset_and_split(panel):
     f = panel.frame(demo.SIG)
     lo, hi = panel.offset("30D"), panel.offset("90D")
     rng = np.random.default_rng(0)
-    rows, y = pairs.timing_pairs(f, lo, hi, 500, 2, rng)
+    rows, y = pairs.time_order_pairs(f, lo, hi, 500, 2, rng)
     early, late = rows[y == 0], rows[y == 1]
     assert len(early) and len(late)
     train = pairs.split_units(f, 0, 4)
-    ra, rb, lab, tr = pairs.identity_pairs(f, lo, hi, 800, 2, rng, train)
+    ra, rb, lab, tr = pairs.reidentification_pairs(f, lo, hi, 800, 2, rng, train)
     gap = f.time[rb] - f.time[ra]
     assert ((gap >= lo) & (gap <= hi)).all()
     same = f.unit[ra] == f.unit[rb]
@@ -72,7 +72,7 @@ def test_pairs_respect_unit_offset_and_split(panel):
 def test_placebo_pairs_cross_units(panel):
     f = panel.frame(demo.CLOCKS)
     rng = np.random.default_rng(1)
-    rows, y = pairs.timing_pairs(f, panel.offset("30D"), panel.offset("90D"),
+    rows, y = pairs.time_order_pairs(f, panel.offset("30D"), panel.offset("90D"),
                                  300, 1, rng, placebo=True)
     assert len(rows) and set(np.unique(y)) == {0, 1}
 
@@ -123,15 +123,15 @@ def test_carry_forward_raises_identity(fast_scorer):
     df["raw"] = raw
     df["locf"] = df.groupby("unit")["raw"].ffill()
     r = audit(Panel(df, "unit", "time"), {"raw": ["raw"], "locf": ["locf"]},
-              offset=(1, 6), which="identity", scorer=fast_scorer, **KW)
-    t = r.identity.set_index("features")["auc"]
+              offset=(1, 6), which="reidentification", scorer=fast_scorer, **KW)
+    t = r.reidentification.set_index("features")["auc"]
     assert t["locf"] > t["raw"] + 0.05
 
 
 def test_nearest_impostors_separate_type_from_individual(fast_scorer):
-    """Planted types, no individual signal: random impostors read the
-    type, nearest impostors read nothing. Add an individual signal and
-    nearest impostors read it."""
+    """Planted types, no individual signal: random controls read the
+    type, nearest controls read nothing. Add an individual signal and
+    nearest controls read it."""
     rng = np.random.default_rng(4)
     n_units, n_t = 400, 60
     u = np.repeat(np.arange(n_units), n_t)
@@ -144,12 +144,12 @@ def test_nearest_impostors_separate_type_from_individual(fast_scorer):
     p = Panel(df, "unit", "time")
     types = [f"type{j}" for j in range(3)]
     r = audit(p, {"types": types, "types_and_self": types + ["self"]},
-                 offset=(5, 30), which="identity",
-                 impostors=("random", "nearest"), scorer=fast_scorer, **KW)
-    t = r.identity.set_index(["features", "impostors"])
+                 offset=(5, 30), which="reidentification",
+                 controls=("random", "nearest_neighbour"), scorer=fast_scorer, **KW)
+    t = r.reidentification.set_index(["features", "controls"])
     assert t.loc[("types", "random"), "auc"] > 0.75
-    assert abs(t.loc[("types", "nearest"), "auc"] - 0.5) < 0.06
-    assert t.loc[("types_and_self", "nearest"), "lo"] > 0.5
+    assert abs(t.loc[("types", "nearest_neighbour"), "auc"] - 0.5) < 0.06
+    assert t.loc[("types_and_self", "nearest_neighbour"), "lo"] > 0.5
 
 
 def test_folds_are_fixed_and_cover_every_unit(panel):
@@ -166,11 +166,11 @@ def test_folds_are_fixed_and_cover_every_unit(panel):
 
 
 def test_same_call_gives_the_same_numbers(panel, fast_scorer):
-    kw = dict(offset=("30D", "90D"), which="identity", n_pairs=600,
+    kw = dict(offset=("30D", "90D"), which="reidentification", n_pairs=600,
               max_pairs_per_unit=2, repeats=2, bootstrap=50, n_jobs=2,
               scorer=fast_scorer)
-    a = audit(panel, demo.SIG, **kw).identity
-    b = audit(panel, demo.SIG, **kw).identity
+    a = audit(panel, demo.SIG, **kw).reidentification
+    b = audit(panel, demo.SIG, **kw).reidentification
     assert a.equals(b)
 
 

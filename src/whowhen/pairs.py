@@ -1,18 +1,18 @@
-"""Pair construction for the two audits.
+"""Pair construction for the two pair tests.
 
-Both audits draw pairs of rows from units with no recorded event.
+Both tests draw pairs of rows from units with no recorded event.
 
-timing    two rows of one unit, a set offset apart; the label says which
-          is the later one. If a unit's rows carry no information about
-          their order, no classifier can beat AUC 0.5.
-identity  two rows a set offset apart, either from one unit (label 1) or
-          from two units observed at the same two times (label 0). If
-          rows carry no information about which unit produced them, no
-          classifier can beat AUC 0.5.
+time order: two rows of one unit, a set offset apart; the label says
+    which is the later one. If a unit's rows carry no information about
+    their order, no classifier can beat AUC 0.5.
+re-identification: two rows a set offset apart, either from one unit
+    (label 1) or from two units observed at the same two times (label
+    0). If rows carry no information about which unit produced them, no
+    classifier can beat AUC 0.5.
 
-Without a time column only the identity audit can run, and its pairs
-are not matched on time: two rows of one unit (label 1), or one row
-each from two units (label 0).
+Without a time column only the re-identification test can run, and its
+pairs are not matched on time: two rows of one unit (label 1), or one
+row each from two units (label 0).
 
 All functions take and return row positions into a ``Frame``.
 """
@@ -24,8 +24,8 @@ import numpy as np
 
 from .panel import Frame
 
-NEAREST_POOL = 256   # candidates examined per anchor for nearest impostors
-NEAREST_K = 5        # the impostor is drawn from this many nearest units
+NEAREST_POOL = 256   # candidates examined per anchor for nearest-neighbour controls
+NEAREST_K = 5        # the control is drawn from this many nearest units
 
 
 def unit_groups(frame: Frame, n_groups: int) -> np.ndarray:
@@ -102,7 +102,7 @@ def _within_unit(frame: Frame, units: np.ndarray, lo: float, hi: float,
 
 
 class _Pool:
-    """Rows of one side indexed by time, for impostor draws."""
+    """Rows of one side indexed by time, for control draws."""
 
     def __init__(self, frame: Frame, rows: np.ndarray):
         self.frame, self.rows = frame, rows
@@ -139,10 +139,10 @@ def unit_profiles(frame: Frame, units: np.ndarray) -> np.ndarray:
     return np.nan_to_num(P, nan=0.0)
 
 
-def timing_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
+def time_order_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
                  max_per_unit: int, rng: np.random.Generator,
                  placebo: bool = False):
-    """Rows and labels for the timing audit (label 1 = the later row).
+    """Rows and labels for the time-order test (label 1 = the later row).
 
     With ``placebo`` the later row comes from a different unit observed
     at the same time, so the pair carries no within-unit information and
@@ -167,25 +167,25 @@ def timing_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
     return rows[first], labels[first]
 
 
-def identity_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
+def reidentification_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
                    max_per_unit: int, rng: np.random.Generator,
-                   train: np.ndarray, impostors: str = "random"):
-    """Pairs for the identity audit.
+                   train: np.ndarray, controls: str = "random"):
+    """Pairs for the re-identification test.
 
     ``train`` is the unit split, drawn before any pair: anchors and
-    impostors come from one side, so every matched pair reaches the
+    controls come from one side, so every matched pair reaches the
     scorer whole. Returns (row_a, row_b, label, is_train).
 
-    impostors="random"   the other unit is any unit observed at the
-                         matched time (any unit, without a time column).
-    impostors="nearest"  the other unit is one of the units most like
-                         the anchor's unit, by standardized per-unit
-                         feature means computed within the side. Such
-                         pairs cannot be told apart by the kind of unit,
-                         only by the individual.
+    controls="random": the other unit is any unit observed at the
+        matched time (any unit, without a time column).
+    controls="nearest_neighbour": the other unit is one of the 5 units
+        nearest the anchor's unit by squared Euclidean distance between
+        standardized per-unit feature means, computed within the side.
+        Differences shared by a kind of unit are matched away; so is a
+        unit's own average level.
     """
-    if impostors not in ("random", "nearest"):
-        raise ValueError("impostors is 'random' or 'nearest'")
+    if controls not in ("random", "nearest_neighbour"):
+        raise ValueError("controls is 'random' or 'nearest_neighbour'")
     n_train = int(round(n_pairs * train.mean()))
     out = []
     for side, n in ((True, n_train), (False, n_pairs - n_train)):
@@ -193,7 +193,7 @@ def identity_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
         same = _within_unit(frame, units, lo, hi, n, max_per_unit, rng)
         in_side = np.flatnonzero(train[frame.unit] == side)
         pool = _Pool(frame, in_side)
-        prof = unit_profiles(frame, units) if impostors == "nearest" else None
+        prof = unit_profiles(frame, units) if controls == "nearest_neighbour" else None
         for a, b in same:
             u = frame.unit[a]
             out.append((a, b, 1, side))
@@ -215,7 +215,8 @@ def identity_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
 
 
 def pair_features(frame: Frame, row_a, row_b, cols: list[int]) -> np.ndarray:
-    """What the identity scorer sees: both rows and their absolute gap."""
+    """What the re-identification scorer sees: both rows and their absolute
+    difference."""
     xa = frame.X[np.ix_(row_a, cols)]
     xb = frame.X[np.ix_(row_b, cols)]
     return np.hstack([xa, xb, np.abs(xa - xb)])

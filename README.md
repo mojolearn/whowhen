@@ -10,7 +10,7 @@ predicting anything:
 - **when**: can two rows of one unit be put in time order?
 
 If the answer to either is yes, a model evaluated on your data may be
-scoring well by recognizing units or reading the clock.
+scoring well by recognizing units or by reading elapsed time.
 
 ## Install
 
@@ -53,7 +53,7 @@ Both interfaces run the same checks.
 | `time` | no | none | the column giving when the row was observed; leave it out if the rows are not ordered in time |
 | `event` | no | none | a column that is nonzero where the event happens |
 | `features` | no | every numeric column | the columns to check: a list, or a dict of named lists to compare side by side |
-| `importance` | no | `False` | rank columns by single-column AUC and drop-column importance: `True` for every checked column, or a list of columns. It costs two model fits per ranked column, per audit and repeat, so it is the slowest part on a wide table |
+| `importance` | no | `False` | column importance: `True` for every checked column, or a list of columns. It costs two model fits per ranked column, per test and repeat, so it is the slowest part on a wide table |
 | `horizon` | no | none | for forecasting tasks: how far ahead the event is predicted, in the time column's scale (`12`, or `"12h"` for datetimes) |
 | `repeats` | no | 4 | how many times every check is run |
 | `random` | no | `False` | draw held-out units at random instead of the fixed groups |
@@ -63,19 +63,20 @@ What runs depends on what you give:
 
 | You give | You get |
 |---|---|
-| `unit` only | the identity audit, the individual-or-type test |
-| `unit` and `event` | plus the overlap check |
-| `unit` and `time` | the identity and timing audits, the timing placebo, the individual-or-type test, the audits by short and long gap |
-| plus `event` | the overlap check, the chronological control, the time-cut split, the clock baseline |
-| plus `horizon` | those three run as a forecast: "does the event come within this long after the row?" |
+| `unit` only | the re-identification test |
+| `unit` and `event` | plus record-wise vs subject-wise validation |
+| `unit` and `time` | the re-identification and time-order tests, the placebo test, results by time gap |
+| plus `event` | record-wise vs subject-wise validation, the within-unit temporal split, out-of-time validation, the time-only baseline |
+| plus `horizon` | the event checks run as a forecast: "does the event come within this long after the row?" |
+| `importance` | column importance for the re-identification and time-order tests |
 
 A check that cannot run is listed at the end of the report with the
 reason.
 
 To compare choices made before modeling, such as raw values against a
 carried-forward or imputed version, put both versions in the table and
-name them. Every check then runs once per named set, the audits on the
-same pairs and the event checks on the same splits:
+name them. Every check then runs once per named set, the pair tests on
+the same pairs and the event checks on the same splits:
 
 ```python
 ww.report(df, unit="patient_id", time="hour",
@@ -91,74 +92,85 @@ whowhen demo
 
 ## What the report contains
 
-**Identity audit and timing audit.** Both train a classifier on pairs
-of rows from units with no recorded event, built so that the two
-classes look the same unless the signal is there. The gap between the
-two rows of a pair is chosen from the data and stated in the report.
+Every check trains a gradient-boosted classifier and reports the AUC on
+units it did not train on. An AUC of 0.5 means the classifier found
+nothing; 1.0 means it was always right.
 
-| Audit | The pair | Label | AUC 0.5 means |
+**Re-identification test and time-order test.** Both classify pairs of
+rows from units with no recorded event, built so that the two classes
+look the same unless the signal is there. The gap between the two rows
+of a pair is chosen from the data and stated in the report.
+
+| Test | The pair | Label | AUC 0.5 means |
 |---|---|---|---|
-| identity | two rows a set time apart | same unit, or two different units seen at the same two times | rows carry nothing that says which unit produced them |
-| timing | two rows of one unit a set time apart | which row is the later one | a unit's rows carry nothing that says when they were recorded |
+| re-identification | two rows a set time apart | same unit, or two different units seen at the same two times | rows carry nothing that says which unit produced them |
+| time order | two rows of one unit a set time apart | which row is the later one | a unit's rows carry nothing that says when they were recorded |
 
 Units are split into training and held-out sides before any pair is
-drawn, so the AUC is measured on units the classifier never saw. The
-interval comes from resampling held-out units, pooled over repeats.
+drawn. The interval comes from a bootstrap over held-out units, pooled
+over repeats.
 
-**Timing placebo.** The timing audit again, with the later row taken
+The re-identification test is reported with two kinds of control (the
+different unit in a pair):
+
+- `random`: any other unit;
+- `nearest_neighbour`: one of the 5 units nearest the first, by
+  squared Euclidean distance between standardized per-unit column
+  means. This matches away differences shared by a kind of unit (a tug
+  against a tanker), and also each unit's own average level.
+
+**Placebo test.** The time-order test again, with the later row taken
 from a different unit observed at that time. If this score is near 0.5,
-the timing signal is each unit's own history. If it is near the timing
-audit's score, the signal is change shared by all units, such as
+the time-order signal is each unit's own history. If it is near the
+time-order score, the signal is change shared by all units, such as
 calendar drift or a change in how every unit is recorded.
 
-**Individual or type.** The identity audit is reported twice. With
-`random` impostors the different unit is any other unit, so a high
-score can mean "these two rows are from different kinds of unit" (a
-tug and a tanker). With `nearest` impostors the different unit is one
-of the units most similar to the first, by per-unit column averages.
-If the score stays high, individual units are recognizable. If it
-falls toward 0.5, the columns identify the kind of unit, not the
-individual.
+**Results by time gap.** Both tests again, once with the two rows of a
+pair in the shorter half of the gap range and once in the longer half.
+The range runs from the median time between a unit's consecutive rows
+to half the median time a unit is observed. If re-identification stays
+high at the long gap, units stay recognizable as time passes.
 
-**Short and long gaps.** Both audits again, once with the two rows of
-a pair in the shorter half of the gap range and once in the longer
-half. If identity stays high at the long gap, units stay recognizable
-as time passes.
+**Column importance.** Off unless you set `importance`. For each
+column: the single-column AUC (that column alone) and the drop-column
+importance (how much the AUC falls when that column is removed), on the
+same pairs.
 
-**Columns.** For each column: the audit using that column alone, and
-how much the full score drops when that column is removed.
+**Record-wise vs subject-wise validation.** Needs `event`. Here subject
+means unit. It scores the same test rows twice, with the same number of
+training rows per class: once with the test units held out of training
+(subject-wise), once with other rows of those units swapped in
+(record-wise, as a split of rows at random would do). The gap between
+the two scores is how much sharing units between training and test is
+worth to this classifier on your task. whowhen makes these splits from
+your one table; it does not use your own split.
 
-**Overlap check.** Needs `event`. It scores the same test rows twice
-with the same number of training rows per class: once with the test
-units held out of training, once with other rows of those units
-swapped in. The gap between the two scores is how much sharing units
-between training and test is worth to this classifier on your task.
+**Within-unit temporal split.** The same comparison, testing the later
+half of each test unit's rows and letting training see the earlier
+half: does a unit's own past help predict its own future?
 
-**Chronological control.** The same check, testing the later half of
-each test unit's rows and letting training see the earlier half: does
-a unit's own past help predict its own future?
+**Out-of-time validation.** The same comparison with a single cut in
+the time column: test rows come after it, training rows before it.
+When the time column is a shared calendar, this is the usual split by
+date, and the gap shows how much unit overlap such a split leaves in
+place.
 
-**Time-cut split.** The same check with a single cut in the time
-column: test rows come after it, training rows before it. When the
-time column is a shared calendar, this is the usual split by date, and
-the gap shows how much unit overlap such a split leaves in place.
-
-**Clock baseline.** Many event tasks can be scored well above chance
-from one number: how long the unit has been observed. This fits the
-same classifier on the clock alone, on your columns alone, and on
-both, with units held out, and reports what the columns add once the
-clock is known.
+**Time-only baseline.** Many event tasks can be scored well above
+chance from one number: how long the unit has been observed. This fits
+the same classifier on elapsed time alone, on your columns alone, and
+on both, with units held out, and reports what the columns add once
+elapsed time is known.
 
 ## What the numbers do not mean
 
-An audit AUC above 0.5 says the signal is present in the columns. It
-does not say your model uses it.
+A pair-test AUC above 0.5 says the signal is present in the columns.
+It does not say your model uses it.
 
-The overlap check does not say so either. It measures what unit overlap
-is worth to whowhen's classifier, on your columns and your outcome,
-under the split it names. A gap there shows the evaluation is sensitive
-to unit overlap. To learn what your own model gains, train it both
-ways.
+Record-wise vs subject-wise validation does not say so either. It
+measures what unit overlap is worth to whowhen's classifier, on your
+columns and your outcome, under the split it names. A gap there shows
+the evaluation is sensitive to unit overlap. To learn what your own
+model gains, train it both ways.
 
 **An AUC near 0.5 does not certify an evaluation.** It says this
 classifier, on these columns, found nothing. Leakage through the
@@ -168,8 +180,8 @@ not in the table is outside what these checks see.
 ## When it applies
 
 - many units (hundreds or more), each observed more than once;
-- for the identity audit, several units observed at the same time
-  values, since the different-unit pair is matched on time;
+- for the re-identification test, several units observed at the same
+  time values, since the different-unit pair is matched on time;
 - without a time column, a pair is two rows of one unit or one row each
   from two units, with no matching on time. If the rows do have an
   order, give the time column: unmatched pairs can also be told apart
@@ -180,11 +192,11 @@ not in the table is outside what these checks see.
 With `horizon`, a unit's last row is taken as the end of its follow-up.
 A row of a unit with no event counts as "no event within the horizon"
 only if the unit was still observed one horizon later; other such rows
-are left out, and the report says how many. Under the chronological and
-time-cut splits, a row from before the cut is trained on only if its
-horizon has passed by the cut, so no label is used before it could
-have been known. If your table ends a unit's rows before its follow-up
-truly ends, extend the rows or shorten the horizon.
+are left out, and the report says how many. Under the temporal split
+and out-of-time validation, a row from before the cut is trained on
+only if its horizon has passed by the cut, so no label is used before
+it could have been known. If your table ends a unit's rows before its
+follow-up truly ends, extend the rows or shorten the horizon.
 
 It does not apply to tables with one row per example and no repeated
 unit.
@@ -227,18 +239,20 @@ environment variable to use fewer.
 
 ```
 whowhen rows.parquet --unit patient_id --time hour --event sepsis
+whowhen rows.parquet --unit patient_id --time hour --importance
 whowhen demo
 ```
 
-CSV and Parquet files are supported. Use `whowhen --help` for report
-options or `whowhen demo --help` for demo options.
+CSV and Parquet files are supported. `--importance` alone ranks every
+column; `--importance a b` ranks only those. Use `whowhen --help` for
+report options or `whowhen demo --help` for demo options.
 
 To use a report in a script or a scheduled job, say what counts as a
 failure:
 
 ```
 whowhen rows.parquet --unit patient_id --time hour --event sepsis \
-    --fail-if "overlap_gap > 0.02" --fail-if "clock_gain < 0.01"
+    --fail-if "record_wise_gap > 0.02" --fail-if "time_only_gain < 0.01"
 ```
 
 The command exits with 1 if any condition holds, and with 2 if a
@@ -247,16 +261,16 @@ there are no built-in thresholds.
 
 | Name | The number |
 |---|---|
-| `identity`, `identity_nearest` | identity AUC against any other unit, and against the most similar units |
-| `timing`, `placebo` | timing AUC, and its placebo |
-| `overlap_gap`, `chronological_gap`, `time_cut_gap` | overlap AUC minus disjoint AUC under each split |
-| `clock` | AUC of the clock alone |
-| `clock_gain` | what the columns add once the clock is known |
+| `reidentification`, `reidentification_nearest_neighbour` | re-identification AUC against random controls, and against nearest-neighbour controls |
+| `time_order`, `placebo` | time-order AUC, and the placebo test |
+| `record_wise_gap`, `temporal_split_gap`, `out_of_time_gap` | record-wise AUC minus subject-wise AUC under each split |
+| `time_only` | AUC of elapsed time alone |
+| `time_only_gain` | what the columns add once elapsed time is known |
 
 With several named feature sets, each number is the one furthest from
-a clean result: the highest AUC, the highest gap, the lowest clock
-gain. A high identity AUC is normal for many tables and is not
-by itself a failure; the gaps say whether it matters for your task.
+a clean result: the highest AUC, the highest gap, the lowest gain. A
+high re-identification AUC is normal for many tables and is not by
+itself a failure; the gaps say whether it matters for your task.
 
 ## Citing
 

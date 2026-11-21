@@ -2,6 +2,24 @@
 
 ## 0.3.0 (unreleased)
 
+- The checks now use standard names. Scripts that read the JSON, call `headline()` or use `--fail-if` need the new names:
+
+| Before | Now |
+|---|---|
+| identity audit, `identity` | re-identification test, `reidentification` |
+| timing audit, `timing` | time-order test, `time_order` |
+| `impostors`: `random`, `nearest` | `controls`: `random`, `nearest_neighbour` |
+| `identity_nearest` | `reidentification_nearest_neighbour` |
+| timing placebo | placebo test, `placebo` |
+| report part `audit` | `pair_tests` |
+| `gaps` | `by_gap` (its `audit` column is now `test`) |
+| `columns` (`alone`, `drop`, `all`) | `importance` (`single_column_auc`, `drop_column_importance`, `all_columns_auc`) |
+| overlap check, `overlap`, `overlap_gap` | record-wise vs subject-wise validation, `record_wise`, `record_wise_gap` |
+| `auc_overlap`, `auc_disjoint` | `auc_record_wise`, `auc_subject_wise` |
+| chronological control, `chronological`, `chronological_gap` | within-unit temporal split, `temporal_split`, `temporal_split_gap` |
+| time-cut split, `time_cut`, `time_cut_gap` | out-of-time validation, `out_of_time`, `out_of_time_gap` |
+| clock baseline, `clock`, `clock_gain` | time-only baseline, `time_only`, `time_only_gain` (inputs `time`, `features + time`) |
+
 - Column importance (single-column AUC and drop-column importance) is off by default. `importance=True` ranks every checked column, and a list ranks only those columns; on the command line, `--importance` or `--importance COLUMN ...`. It costs two model fits per ranked column for each audit and repeat, so on a table with hundreds of columns it took far longer than every other check together.
 
 ## 0.2.1

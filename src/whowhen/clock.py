@@ -1,4 +1,4 @@
-"""Clock baseline: how much of the task does elapsed time alone predict?
+"""Time-only baseline: how much of the task does elapsed time alone predict?
 
 Many event tasks on panel data can be scored well above chance from one
 number, the time since the unit was first observed. A model's score
@@ -38,7 +38,7 @@ def _replicate(sets: dict, y, unit, b: int, seed: int, groups, random: bool,
 
 @dataclass
 class ClockResult:
-    """What the clock baseline found.
+    """What the time-only baseline found.
 
     table : one row per input, with the mean held-out AUC and the 2.5
         and 97.5 percentiles over repeats.
@@ -61,11 +61,11 @@ class ClockResult:
                 "scorer": self.scorer, "info": self.info}
 
     def __repr__(self) -> str:
-        return (f"clock baseline ({self.repeats} repeats, units held "
+        return (f"time-only baseline ({self.repeats} repeats, units held "
                 f"out, scorer: {self.scorer['name']})\n"
                 f"{self.table.round(3).to_string(index=False)}\n"
                 f"  features add {self.gain:+.3f} "
-                f"[{self.gain_lo:+.3f}, {self.gain_hi:+.3f}] to the clock"
+                f"[{self.gain_lo:+.3f}, {self.gain_hi:+.3f}] to time alone"
                 + follow_up_note(self.info))
 
 
@@ -80,10 +80,10 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
     clock column if the comparison is to mean anything.
     """
     if not panel.event:
-        raise ValueError("the clock baseline needs a panel with an event "
+        raise ValueError("the time-only baseline needs a panel with an event "
                          "column; pass event= to Panel")
     if panel.time is None:
-        raise ValueError("the clock baseline needs a time column")
+        raise ValueError("the time-only baseline needs a time column")
     features = list(features)
     seed = pick_seed(seed, random)
     sc = resolve(model)
@@ -100,12 +100,12 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
         keep, y, unfollowed = forecast_labels(unit, time, y,
                                               panel.offset(horizon))
         X, unit, clock = X[keep], unit[keep], clock[keep]
-    sets = {"clock": clock, "features": X,
-            "features + clock": np.hstack([X, clock])}
+    sets = {"time": clock, "features": X,
+            "features + time": np.hstack([X, clock])}
     if np.isnan(X).any():
         counts = (~np.isnan(X)).sum(1, keepdims=True).astype(np.float32)
-        sets = {"clock": clock, "clock + counts": np.hstack([clock, counts]),
-                "features": X, "features + clock": sets["features + clock"]}
+        sets = {"time": clock, "time + counts": np.hstack([clock, counts]),
+                "features": X, "features + time": sets["features + time"]}
     groups = unit_groups(frame, repeats + 1)
     workers = n_workers(n_jobs, repeats)
     threads = max(1, cores() // workers)
@@ -121,7 +121,7 @@ def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
                            "lo": np.percentile(per[c], 2.5),
                            "hi": np.percentile(per[c], 97.5)}
                           for c in per.columns])
-    g = per["features + clock"] - per["clock"]
+    g = per["features + time"] - per["time"]
     info = {"features": features, "n_units": frame.n_units,
             "n_rows": int(len(y)), "event_rate": float(y.mean()),
             "horizon": None if horizon is None else str(horizon),
