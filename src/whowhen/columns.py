@@ -22,7 +22,7 @@ def _fit_auc(frame: Frame, d: Draw, cols: tuple, scorer: Scorer, seed: int,
 def rank_columns(panel: Panel, columns, offset=None, *, scorer=None,
                  which=None,
                  n_pairs: int = 20000, max_pairs_per_unit: int = 20,
-                 repeats: int = 4, random: bool = False,
+                 repeats: int = 3, random: bool = False,
                  seed: int | None = None,
                  n_jobs: int | None = None) -> dict[str, pd.DataFrame]:
     """Column importance for the re-identification and time-order tests.

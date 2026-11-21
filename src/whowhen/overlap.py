@@ -243,7 +243,7 @@ def follow_up_note(info: dict) -> str:
 
 
 def overlap_check(panel: Panel, features, *, model=None,
-                  repeats: int = 4,
+                  repeats: int = 3,
                   time_split: str | None = None,
                   horizon=None, random: bool = False, seed: int | None = None,
                   n_jobs: int | None = None) -> OverlapResult:

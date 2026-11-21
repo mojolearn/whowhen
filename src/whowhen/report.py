@@ -150,7 +150,7 @@ NEEDS_TIME = ("by_gap", "temporal_split", "out_of_time", "time_only")
 
 def report(df: pd.DataFrame, unit: str, time: str | None = None,
            event: str | None = None, *, features=None, horizon=None,
-           repeats: int = 4,
+           repeats: int = 3,
            random: bool = False, n_pairs: int = 20000,
            _scorer=None) -> Report:
     """Run every check the table supports and return them together.
@@ -189,7 +189,7 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
         horizon has passed by the cut.
     repeats : one number, N: every check runs N times. Units fall into
         N + 1 fixed groups and each run holds out a different group: 1
-        holds out a half, 2 a third each, 4 (the default) a fifth each.
+        holds out a half, 2 a third each, 3 (the default) a quarter each.
     random : False by default, so the same call gives the same numbers
         every time. True draws held-out units and pairs at random,
         differently on each run, and records the seed it used.

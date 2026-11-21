@@ -220,7 +220,7 @@ def pair_gap(panel: Panel, offset, which) -> tuple:
 def audit(panel: Panel, features, offset=None, *, scorer=None,
           which=None, controls="random",
           n_pairs: int = 20000,
-          max_pairs_per_unit: int = 20, repeats: int = 4,
+          max_pairs_per_unit: int = 20, repeats: int = 3,
           bootstrap: int = 2000, random: bool = False,
           seed: int | None = None,
           n_jobs: int | None = None) -> AuditResult:
@@ -247,7 +247,7 @@ def audit(panel: Panel, features, offset=None, *, scorer=None,
     repeats : how many times to repeat. Units fall into repeats + 1
         fixed groups (by a hash of the unit identifier) and each
         repeat holds out a different group and draws its own pairs: 1
-        holds out a half, 2 a third each, 4 a fifth each. More repeats
+        holds out a half, 2 a third each, 3 a quarter each. More repeats
         test more of the units and leave more to train on.
     random : False by default: the held-out groups are fixed and the
         same call gives the same numbers on every run. True draws the

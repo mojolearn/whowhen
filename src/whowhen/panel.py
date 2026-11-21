@@ -123,7 +123,7 @@ class Frame:
     unit_labels: np.ndarray
     y: np.ndarray | None       # per-row event flag
     n_units_all: int
-    repeats: int = 4          # set by the caller; fixes the unit groups
+    repeats: int = 3          # set by the caller; fixes the unit groups
     random: bool = False      # held-out units drawn at random instead
 
     @property

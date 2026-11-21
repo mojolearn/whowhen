@@ -2,6 +2,7 @@
 
 ## 0.3.0 (unreleased)
 
+- `repeats` defaults to 3 instead of 4: each run holds out a quarter of the units instead of a fifth, and every report does a quarter fewer model fits.
 - The checks now use standard names. Scripts that read the JSON, call `headline()` or use `--fail-if` need the new names:
 
 | Before | Now |

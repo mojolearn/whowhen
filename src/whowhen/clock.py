@@ -4,7 +4,7 @@ Many event tasks on panel data can be scored well above chance from one
 number, the time since the unit was first observed. A model's score
 means little until it is set beside that.
 
-Each replicate holds out a fresh fifth of the units and fits the same
+Each replicate holds out one group of the units and fits the same
 scorer on several inputs: the clock alone, the features alone, and the
 features with the clock. When rows have missing values, the count of
 observed values per row is added as a second cheap input.
@@ -70,7 +70,7 @@ class ClockResult:
 
 
 def clock_baseline(panel: Panel, features, *, horizon=None, model=None,
-                   repeats: int = 4,
+                   repeats: int = 3,
                    random: bool = False, seed: int | None = None,
                    n_jobs: int | None = None) -> ClockResult:
     """Score the event task from elapsed time alone, and beside the features.

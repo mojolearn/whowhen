@@ -83,7 +83,7 @@ def main() -> None:  # pragma: no cover
                         "column importance; whowhenall checks and ranks "
                         "every numeric column")
     r.add_argument("--horizon", default=None)
-    r.add_argument("--repeats", type=int, default=4)
+    r.add_argument("--repeats", type=int, default=3)
     r.add_argument("--random", action="store_true")
     r.add_argument("--out", type=Path, default=None, help="write JSON here")
     r.add_argument("--fail-if", action="append", default=[],

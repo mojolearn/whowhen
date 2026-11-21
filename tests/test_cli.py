@@ -37,7 +37,7 @@ def test_table_command_reads_csv_and_writes_report(tmp_path, monkeypatch, capsys
     assert calls[0][0].to_dict("records") == [
         {"patient": "a", "hour": 0, "event": 0, "value": 2}]
     assert calls[0][1] == dict(unit="patient", time="hour", event="event",
-                              features=None, horizon=12.0, repeats=4,
+                              features=None, horizon=12.0, repeats=3,
                               random=False)
     assert json.loads(output.read_text()) == {"checked": True}
     captured = capsys.readouterr()

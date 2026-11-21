@@ -53,8 +53,8 @@ Both interfaces run the same checks.
 | `time` | no | none | the column giving when the row was observed; leave it out if the rows are not ordered in time |
 | `event` | no | none | a column that is nonzero where the event happens |
 | `features` | no | every numeric column, no column importance | `["whowhenall"]`: every numeric column, each ranked by column importance. A list: only those columns, each ranked. A dict of named lists: each set checked side by side |
-| `horizon` | no | none | for forecasting tasks: how far ahead the event is predicted, in the time column's scale (`12`, or `"12h"` for datetimes) |
-| `repeats` | no | 4 | how many times every check is run |
+| `horizon` | no | none | for forecasting tasks: how far ahead the event is predicted, in the time column's scale (`12`, or for a datetime column a string with a unit: `"45s"`, `"90min"`, `"12h"`, `"30D"`, `"2W"`; months and years are refused because their length varies) |
+| `repeats` | no | 3 | how many times every check is run |
 | `random` | no | `False` | draw held-out units at random instead of the fixed groups |
 | `n_pairs` | no | 20000 | the most row pairs each run uses; smaller tables use what they have |
 
@@ -213,8 +213,8 @@ holds out a different group:
 |---|---|
 | 1 | one half of the units |
 | 2 | one third |
-| 3 | one quarter |
-| 4 (default) | one fifth |
+| 3 (default) | one quarter |
+| 4 | one fifth |
 
 More repeats give a steadier answer, but each run then tests a smaller
 share of the units, so very high values suit only large tables.
