@@ -7,6 +7,9 @@ import numpy as np
 import pandas as pd
 
 
+GROUP_MIN_UNITS = 10   # a group column has at least this many units per value
+
+
 class Panel:
     """Repeated observations per unit.
 
@@ -17,9 +20,11 @@ class Panel:
     time : column giving when the row was observed. Datetime or numeric.
         Left out for a table whose rows are not ordered in time; the
         checks that need an order then cannot run.
-    event : optional column; a unit with any nonzero value is left out of
-        the pair tests, so every row they use comes from a unit with no
-        recorded event. Record-wise vs subject-wise validation uses it as the label.
+    event : optional column, nonzero where the event happens. The
+        time-order test leaves out units with any event. The
+        re-identification test keeps them and matches each control on
+        event status. Record-wise vs subject-wise validation uses it as
+        the label.
     """
 
     def __init__(self, df: pd.DataFrame, unit: str, time: str | None = None,
@@ -43,6 +48,34 @@ class Panel:
         self.n_duplicates_dropped = n_before - len(df)
         self.datetime = (time is not None
                          and pd.api.types.is_datetime64_any_dtype(df[time]))
+        self._groups = None
+
+    def group_columns(self) -> list[str]:
+        """Columns that record a group a unit belongs to (site, batch,
+        scanner, model): the same value on every row of every unit, at
+        least two values, and on average at least GROUP_MIN_UNITS units
+        per value. Re-identification controls are matched on them."""
+        if self._groups is None:
+            d, u = self.df, self.unit
+            n_units = d[u].nunique()
+            cand = [c for c in d.columns if c not in (u, self.time,
+                                                      self.event)]
+            out = []
+            if cand:
+                per_unit = d.groupby(u, sort=False)[cand].nunique(dropna=False)
+                for c in cand:
+                    n = d[c].nunique(dropna=False)
+                    if (per_unit[c].max() == 1 and n >= 2
+                            and n * GROUP_MIN_UNITS <= n_units):
+                        out.append(c)
+            self._groups = out
+        return self._groups
+
+    def matched_on(self) -> list[str]:
+        """What re-identification controls are matched on, in words."""
+        return ((["time"] if self.time else [])
+                + (["event status"] if self.event else [])
+                + self.group_columns())
 
     def __repr__(self) -> str:
         return (f"Panel({len(self.df):,} rows, "
@@ -76,7 +109,8 @@ class Panel:
         return lo, max(lo, span)
 
     def frame(self, columns: list[str],
-              keep_event_units: bool = False) -> "Frame":
+              keep_event_units: bool = False,
+              match: bool = False) -> "Frame":
         """Plain arrays for the checks. Rows stay sorted by (unit, time),
         or by unit alone when there is no time column."""
         missing = [c for c in columns if c not in self.df.columns]
@@ -106,10 +140,24 @@ class Panel:
         if self.event:
             y = (df[self.event].fillna(0).to_numpy() != 0).astype(np.int8)
         starts = np.flatnonzero(np.r_[True, unit[1:] != unit[:-1], True])
+        stratum = None
+        if match:
+            keys = self.group_columns()
+            per = df.groupby(self.unit, sort=False)
+            per = (per[keys].first() if keys
+                   else pd.DataFrame(index=per.size().index))
+            if self.event:
+                per["__event__"] = (df[self.event].fillna(0).ne(0)
+                                    .groupby(df[self.unit], sort=False).any())
+            per = per.reindex(labels)
+            stratum = (per.groupby(list(per.columns), sort=False,
+                                   dropna=False).ngroup().to_numpy(np.int64)
+                       if len(per.columns) else
+                       np.zeros(len(labels), np.int64))
         return Frame(unit=unit.astype(np.int64), time=time, X=X,
                      columns=list(columns), starts=starts,
                      unit_labels=np.asarray(labels), y=y,
-                     n_units_all=int(n_units_all))
+                     n_units_all=int(n_units_all), stratum=stratum)
 
 
 @dataclass
@@ -123,6 +171,8 @@ class Frame:
     unit_labels: np.ndarray
     y: np.ndarray | None       # per-row event flag
     n_units_all: int
+    stratum: np.ndarray | None = None   # per unit: units a control may
+                                        # come from share this value
     repeats: int = 3          # set by the caller; fixes the unit groups
     random: bool = False      # held-out units drawn at random instead
 

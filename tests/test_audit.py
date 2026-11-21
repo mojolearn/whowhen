@@ -77,7 +77,7 @@ def test_placebo_pairs_cross_units(panel):
     assert len(rows) and set(np.unique(y)) == {0, 1}
 
 
-def test_event_units_are_left_out():
+def test_event_units_leave_time_order_and_stay_in_reidentification():
     df = demo.synthesize(n_units=60, n_days=40)
     df["event"] = ((df["unit"] < "u0020") & (df["time"] == df["time"].max())
                    ).astype(int)
@@ -85,6 +85,14 @@ def test_event_units_are_left_out():
     f = p.frame(demo.SIG)
     assert f.n_units == 40 and f.n_units_all == 60
     assert not set(f.unit_labels) & {f"u{i:04d}" for i in range(20)}
+    m = p.frame(demo.SIG, keep_event_units=True, match=True)
+    assert m.n_units == 60
+    had = np.isin(m.unit_labels, [f"u{i:04d}" for i in range(20)])
+    assert len(set(m.stratum[had]) & set(m.stratum[~had])) == 0
+    ra, rb, lab, _ = pairs.reidentification_pairs(
+        m, p.offset("5D"), p.offset("20D"), 600, 2,
+        np.random.default_rng(0), pairs.split_units(m, 0, 3))
+    assert (had[m.unit[ra]] == had[m.unit[rb]]).all()   # same event status
 
 
 def test_numeric_time_and_offset_errors():
@@ -128,28 +136,28 @@ def test_carry_forward_raises_identity(fast_scorer):
     assert t["locf"] > t["raw"] + 0.05
 
 
-def test_nearest_impostors_separate_type_from_individual(fast_scorer):
-    """Planted types, no individual signal: random controls read the
-    type, nearest controls read nothing. Add an individual signal and
-    nearest controls read it."""
+def test_recorded_types_are_matched_away_and_individuals_kept(fast_scorer):
+    """Planted types recorded in a column, no individual signal: matched
+    controls read nothing. Add an individual signal and they read it."""
     rng = np.random.default_rng(4)
     n_units, n_t = 400, 60
     u = np.repeat(np.arange(n_units), n_t)
     n = len(u)
     df = pd.DataFrame({"unit": u, "time": np.tile(np.arange(n_t), n_units)})
     kind = rng.integers(0, 8, n_units)
+    df["kind"] = kind[u]
     for j in range(3):
         df[f"type{j}"] = (rng.normal(0, 3, 8)[kind])[u] + rng.normal(0, .3, n)
     df["self"] = rng.normal(0, 1, n_units)[u] + rng.normal(0, .3, n)
     p = Panel(df, "unit", "time")
     types = [f"type{j}" for j in range(3)]
     r = audit(p, {"types": types, "types_and_self": types + ["self"]},
-                 offset=(5, 30), which="reidentification",
-                 controls=("random", "nearest_neighbour"), scorer=fast_scorer, **KW)
-    t = r.reidentification.set_index(["features", "controls"])
-    assert t.loc[("types", "random"), "auc"] > 0.75
-    assert abs(t.loc[("types", "nearest_neighbour"), "auc"] - 0.5) < 0.06
-    assert t.loc[("types_and_self", "nearest_neighbour"), "lo"] > 0.5
+              offset=(5, 30), which="reidentification", scorer=fast_scorer,
+              **KW)
+    assert r.info["matched_on"] == ["time", "kind"]
+    t = r.reidentification.set_index("features")
+    assert abs(t.loc["types", "auc"] - 0.5) < 0.06
+    assert t.loc["types_and_self", "lo"] > 0.6
 
 
 def test_folds_are_fixed_and_cover_every_unit(panel):

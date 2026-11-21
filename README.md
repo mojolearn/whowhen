@@ -96,27 +96,40 @@ units it did not train on. An AUC of 0.5 means the classifier found
 nothing; 1.0 means it was always right.
 
 **Re-identification test and time-order test.** Both classify pairs of
-rows from units with no recorded event, built so that the two classes
-look the same unless the signal is there. The gap between the two rows
+rows, built so that the two classes look the same unless the signal is
+there. The gap between the two rows
 of a pair is chosen from the data and stated in the report.
 
 | Test | The pair | Label | AUC 0.5 means |
 |---|---|---|---|
-| re-identification | two rows a set time apart | same unit, or two different units seen at the same two times | rows carry nothing that says which unit produced them |
+| re-identification | two rows a set time apart | same unit, or a unit and a matched control | rows carry nothing that says which unit produced them |
 | time order | two rows of one unit a set time apart | which row is the later one | a unit's rows carry nothing that says when they were recorded |
 
 Units are split into training and held-out sides before any pair is
 drawn. The interval comes from a bootstrap over held-out units, pooled
 over repeats.
 
-The re-identification test is reported with two kinds of control (the
-different unit in a pair):
+The control in a re-identification pair is a random other unit matched
+to the first on everything the table records about a unit other than
+who it is:
 
-- `random`: any other unit;
-- `nearest_neighbour`: one of the 5 units nearest the first, by
-  squared Euclidean distance between standardized per-unit column
-  means. This matches away differences shared by a kind of unit (a tug
-  against a tanker), and also each unit's own average level.
+- **time**: the control's row was observed at the same time as the
+  second row of the same-unit pair, when there is a time column;
+- **event status**: units that had the event are compared with units
+  that had it, and units that did not with units that did not, when
+  there is an event column;
+- **group columns**: columns with the same value on every row of a
+  unit and on average at least 10 units per value, such as site,
+  batch, scanner, sex or machine model. They are found automatically.
+
+So a site, batch or calendar effect shared by a unit's rows cannot pass
+for identity, while each unit's own level still counts. The report
+lists what the controls were matched on. A group the table does not
+record cannot be matched: add it as a column if you know it. A unit
+whose matching group has no other unit is left out of the test.
+
+The time-order test and its placebo use units with no recorded event,
+so the event itself cannot pass for the passage of time.
 
 **Placebo test.** The time-order test again, with the later row taken
 from a different unit observed at that time. If this score is near 0.5,
@@ -183,11 +196,12 @@ not in the table is outside what these checks see.
 
 - many units (hundreds or more), each observed more than once;
 - for the re-identification test, several units observed at the same
-  time values, since the different-unit pair is matched on time;
-- without a time column, a pair is two rows of one unit or one row each
-  from two units, with no matching on time. If the rows do have an
-  order, give the time column: unmatched pairs can also be told apart
-  by anything that changed between the times the units were observed;
+  time values and in each matching group, since controls are matched
+  on both;
+- without a time column, controls are matched on event status and
+  group columns only. If the rows do have an order, give the time
+  column: otherwise anything that changed between the times units were
+  observed can pass for identity;
 - with `horizon`, an event column flagged on the row where the event
   happens, not on every row of the unit.
 
@@ -263,7 +277,7 @@ there are no built-in thresholds.
 
 | Name | The number |
 |---|---|
-| `reidentification`, `reidentification_nearest_neighbour` | re-identification AUC against random controls, and against nearest-neighbour controls |
+| `reidentification` | re-identification AUC against matched controls |
 | `time_order`, `placebo` | time-order AUC, and the placebo test |
 | `record_wise_gap`, `temporal_split_gap`, `out_of_time_gap` | record-wise AUC minus subject-wise AUC under each split |
 | `time_only` | AUC of elapsed time alone |

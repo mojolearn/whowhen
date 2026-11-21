@@ -43,7 +43,6 @@ class Draw:
         unit role, for the cluster bootstrap.
     """
     kind: str
-    mode: str
     k: int
     rows_a: np.ndarray
     rows_b: np.ndarray | None
@@ -65,7 +64,7 @@ class Draw:
                          X[~self.tr])
 
 
-def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
+def draw(frame: Frame, kind: str, k: int, seed: int, lo: float,
          hi: float, n_pairs: int, max_per_unit: int) -> Draw:
     """The pairs and unit split of seed ``k``; deterministic in
     (seed, k), so audit() and rank_columns() draw the same pairs."""
@@ -74,7 +73,7 @@ def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
                           rng if frame.random else None)
     if kind == "reidentification":
         ra, rb, y, tr = P.reidentification_pairs(frame, lo, hi, n_pairs,
-                                         max_per_unit, rng, train, mode)
+                                                 max_per_unit, rng, train)
         roles_all = [frame.unit[ra], frame.unit[rb]]
     else:
         ra, y = P.time_order_pairs(frame, lo, hi, n_pairs, max_per_unit, rng,
@@ -90,7 +89,7 @@ def draw(frame: Frame, kind: str, mode: str, k: int, seed: int, lo: float,
             + (" this offset apart" if frame.time is not None else ""))
     codes, inv = np.unique(np.concatenate([r[te] for r in roles_all]),
                            return_inverse=True)
-    return Draw(kind, mode, k, ra, rb, y, tr,
+    return Draw(kind, k, ra, rb, y, tr,
                 np.split(inv, len(roles_all)), int(len(codes)))
 
 
@@ -105,15 +104,15 @@ def pick_seed(seed: int | None, random: bool = False) -> int:
     return 0
 
 
-def _one_seed(frame: Frame, kind: str, mode: str, k: int, seed: int,
+def _one_seed(frame: Frame, kind: str, k: int, seed: int,
               sets: dict, lo: float, hi: float, n_pairs: int,
               max_per_unit: int, n_boot: int, scorer: Scorer,
               threads: int) -> dict:
     """One pair draw, one unit split, one fit per feature set."""
-    d = draw(frame, kind, mode, k, seed, lo, hi, n_pairs, max_per_unit)
+    d = draw(frame, kind, k, seed, lo, hi, n_pairs, max_per_unit)
     brng = np.random.default_rng(seed + 7 + 1000 * k)
     yte = d.y[~d.tr]
-    out = {"kind": kind, "controls": mode, "k": k,
+    out = {"kind": kind, "k": k,
            "n_train": int(d.tr.sum()), "n_test": int((~d.tr).sum()),
            "n_test_units": d.n_test_units, "sets": {}}
     for name, cols in sets.items():
@@ -167,20 +166,15 @@ def _table(runs: list[dict], kind: str) -> pd.DataFrame | None:
     if not runs:
         return None
     rows = []
-    for mode in dict.fromkeys(r["controls"] for r in runs):
-        sub = [r for r in runs if r["controls"] == mode]
-        for name in sub[0]["sets"]:
-            aucs = [r["sets"][name]["auc"] for r in sub]
-            boot = np.concatenate([r["sets"][name]["boot"] for r in sub])
-            lo, hi = np.percentile(boot, [2.5, 97.5])
-            row = {"features": name}
-            if kind == "reidentification":
-                row["controls"] = mode
-            row.update(auc=float(np.mean(aucs)), lo=float(lo), hi=float(hi),
-                       lowest_run=float(np.min(aucs)),
-                       highest_run=float(np.max(aucs)),
-                       test_rows=int(np.mean([r["n_test"] for r in sub])))
-            rows.append(row)
+    for name in runs[0]["sets"]:
+        aucs = [r["sets"][name]["auc"] for r in runs]
+        boot = np.concatenate([r["sets"][name]["boot"] for r in runs])
+        lo, hi = np.percentile(boot, [2.5, 97.5])
+        rows.append({"features": name, "auc": float(np.mean(aucs)),
+                     "lo": float(lo), "hi": float(hi),
+                     "lowest_run": float(np.min(aucs)),
+                     "highest_run": float(np.max(aucs)),
+                     "test_rows": int(np.mean([r["n_test"] for r in runs]))})
     return pd.DataFrame(rows)
 
 
@@ -192,6 +186,28 @@ def _feature_sets(features) -> dict:
     if not sets or any(not v for v in sets.values()):
         raise ValueError("every feature set needs at least one column")
     return sets
+
+
+def test_frames(panel: Panel, columns: list[str], which, repeats: int,
+                random: bool) -> dict:
+    """The rows each pair test draws from. Re-identification uses every
+    unit, with each unit's matching group; time order and its placebo
+    use units with no event."""
+    frames, plain = {}, None
+    for kind in which:
+        if kind == "reidentification":
+            f = panel.frame(columns, keep_event_units=True, match=True)
+        else:
+            plain = plain or panel.frame(columns)
+            f = plain
+        f.repeats, f.random = repeats, random
+        if f.n_units < 10:
+            raise ValueError(
+                f"only {f.n_units} units"
+                + (" without an event" if kind != "reidentification" else "")
+                + f"; the {kind} test needs many units")
+        frames[kind] = f
+    return frames
 
 
 def pair_gap(panel: Panel, offset, which) -> tuple:
@@ -218,7 +234,7 @@ def pair_gap(panel: Panel, offset, which) -> tuple:
 
 
 def audit(panel: Panel, features, offset=None, *, scorer=None,
-          which=None, controls="random",
+          which=None,
           n_pairs: int = 20000,
           max_pairs_per_unit: int = 20, repeats: int = 3,
           bootstrap: int = 2000, random: bool = False,
@@ -240,8 +256,6 @@ def audit(panel: Panel, features, offset=None, *, scorer=None,
     which : any of 'reidentification', 'time_order', 'placebo'. Default:
         reidentification and time_order, or reidentification alone when
         the panel has no time column.
-    controls : 'random', 'nearest_neighbour', or both in a tuple. See
-        ``whowhen.pairs.reidentification_pairs``.
     n_pairs, max_pairs_per_unit : how many pairs to draw, and how many
         one unit may contribute.
     repeats : how many times to repeat. Units fall into repeats + 1
@@ -258,29 +272,29 @@ def audit(panel: Panel, features, offset=None, *, scorer=None,
     """
     sets = _feature_sets(features)
     which, lo, hi = pair_gap(panel, offset, which)
-    modes = (controls,) if isinstance(controls, str) else tuple(controls)
     seed = pick_seed(seed, random)
     sc = resolve(scorer)
     columns = list(dict.fromkeys(c for v in sets.values() for c in v))
-    frame = panel.frame(columns)
-    frame.repeats, frame.random = repeats, random
-    if frame.n_units < 10:
-        raise ValueError(f"only {frame.n_units} units without an event; "
-                         f"the pair tests need many units")
-    col_sets = {name: frame.cols(v) for name, v in sets.items()}
-    tasks = [(kind, mode, k) for kind in which
-             for mode in (modes if kind == "reidentification" else ("random",))
-             for k in range(repeats)]
+    frames = test_frames(panel, columns, which, repeats, random)
+    f0 = next(iter(frames.values()))
+    col_sets = {name: f0.cols(v) for name, v in sets.items()}
+    tasks = [(kind, k) for kind in which for k in range(repeats)]
     workers = n_workers(n_jobs, len(tasks))
     threads = max(1, cores() // workers)
     runs = Parallel(n_jobs=workers)(
-        delayed(_one_seed)(frame, kind, mode, k, seed, col_sets, lo, hi,
+        delayed(_one_seed)(frames[kind], kind, k, seed, col_sets, lo, hi,
                            n_pairs, max_pairs_per_unit, bootstrap, sc,
                            threads)
-        for kind, mode, k in tasks)
-    info = {"n_units": frame.n_units_all,
-            "n_units_without_event": frame.n_units,
-            "n_rows_checked": int(len(frame.unit)),
+        for kind, k in tasks)
+    info = {"n_units": f0.n_units_all,
+            "n_units_reidentification": (
+                frames["reidentification"].n_units
+                if "reidentification" in frames else None),
+            "n_units_time_order": next(
+                (f.n_units for k, f in frames.items()
+                 if k != "reidentification"), None),
+            "matched_on": (panel.matched_on()
+                           if "reidentification" in frames else None),
             "offset": (None if panel.time is None
                        else [str(offset[0]), str(offset[1])]),
             "repeats": repeats, "bootstrap": bootstrap, "seed": seed, "random": random,

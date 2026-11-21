@@ -1,18 +1,15 @@
 """Pair construction for the two pair tests.
 
-Both tests draw pairs of rows from units with no recorded event.
-
-time order: two rows of one unit, a set offset apart; the label says
-    which is the later one. If a unit's rows carry no information about
-    their order, no classifier can beat AUC 0.5.
-re-identification: two rows a set offset apart, either from one unit
-    (label 1) or from two units observed at the same two times (label
-    0). If rows carry no information about which unit produced them, no
+time order: two rows of one unit with no recorded event, a set offset
+    apart; the label says which is the later one. If a unit's rows carry
+    no information about their order, no classifier can beat AUC 0.5.
+re-identification: two rows of one unit a set offset apart (label 1),
+    or the first of them with a row of a matched control unit (label 0).
+    If rows carry no information about which unit produced them, no
     classifier can beat AUC 0.5.
 
 Without a time column only the re-identification test can run, and its
-pairs are not matched on time: two rows of one unit (label 1), or one
-row each from two units (label 0).
+controls are matched on event status and group columns only.
 
 All functions take and return row positions into a ``Frame``.
 """
@@ -24,8 +21,6 @@ import numpy as np
 
 from .panel import Frame
 
-NEAREST_POOL = 256   # candidates examined per anchor for nearest-neighbour controls
-NEAREST_K = 5        # the control is drawn from this many nearest units
 
 
 def unit_groups(frame: Frame, n_groups: int) -> np.ndarray:
@@ -102,41 +97,39 @@ def _within_unit(frame: Frame, units: np.ndarray, lo: float, hi: float,
 
 
 class _Pool:
-    """Rows of one side indexed by time, for control draws."""
+    """Rows of one side, indexed by matching group and time, for control
+    draws."""
 
     def __init__(self, frame: Frame, rows: np.ndarray):
-        self.frame, self.rows = frame, rows
-        if frame.time is not None:
-            order = np.argsort(frame.time[rows], kind="stable")
-            self.time, self.rows = frame.time[rows][order], rows[order]
+        self.frame = frame
+        g = (frame.stratum[frame.unit[rows]] if frame.stratum is not None
+             else np.zeros(len(rows), np.int64))
+        t = (frame.time[rows] if frame.time is not None
+             else np.zeros(len(rows)))
+        order = np.lexsort((t, g))
+        self.rows, self.g, self.t = rows[order], g[order], t[order]
 
-    def at(self, row: int, rng: np.random.Generator) -> np.ndarray:
-        """Rows observed at ``row``'s time. Without a time column: a
-        random draw of NEAREST_POOL rows of the side."""
-        if self.frame.time is None:
-            return np.unique(self.rows[rng.integers(0, len(self.rows),
-                                                    NEAREST_POOL)])
-        t = self.frame.time[row]
-        i0 = np.searchsorted(self.time, t, "left")
-        i1 = np.searchsorted(self.time, t, "right")
-        return self.rows[i0:i1]
-
-
-def unit_profiles(frame: Frame, units: np.ndarray) -> np.ndarray:
-    """Per-unit feature means, standardized across ``units``. Rows of
-    units outside ``units`` are left NaN."""
-    P = np.full((frame.n_units, frame.X.shape[1]), np.nan)
-    for u in units:
-        block = frame.X[frame.starts[u]:frame.starts[u + 1]]
-        seen = ~np.isnan(block)
-        n = seen.sum(0)
-        P[u] = np.where(n > 0, np.where(seen, block, 0).sum(0)
-                        / np.maximum(n, 1), np.nan)
-    mu = np.nanmean(P[units], axis=0) if len(units) else 0.0
-    sd = np.nanstd(P[units], axis=0) if len(units) else 1.0
-    sd = np.where(np.isfinite(sd) & (sd > 0), sd, 1.0)
-    P = (P - np.where(np.isfinite(mu), mu, 0.0)) / sd
-    return np.nan_to_num(P, nan=0.0)
+    def pick(self, row: int, unit: int, rng: np.random.Generator) -> int:
+        """A random row of another unit in ``unit``'s matching group,
+        observed at ``row``'s time (any time, without a time column);
+        -1 if there is none."""
+        f = self.frame
+        g = f.stratum[unit] if f.stratum is not None else 0
+        i0 = np.searchsorted(self.g, g, "left")
+        i1 = np.searchsorted(self.g, g, "right")
+        if f.time is not None:
+            t = f.time[row]
+            i0, i1 = (i0 + np.searchsorted(self.t[i0:i1], t, "left"),
+                      i0 + np.searchsorted(self.t[i0:i1], t, "right"))
+        if i1 <= i0:
+            return -1
+        for _ in range(8):            # most draws land on another unit
+            j = self.rows[rng.integers(i0, i1)]
+            if f.unit[j] != unit:
+                return int(j)
+        cand = self.rows[i0:i1]
+        cand = cand[f.unit[cand] != unit]
+        return int(cand[rng.integers(0, len(cand))]) if len(cand) else -1
 
 
 def time_order_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
@@ -154,11 +147,9 @@ def time_order_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
         pool = _Pool(frame, np.arange(len(frame.unit)))
         keep = []
         for a, b in pairs:
-            u = frame.unit[a]
-            cand = pool.at(b, rng)
-            cand = cand[frame.unit[cand] != u]
-            if len(cand):
-                keep.append((a, cand[rng.integers(0, len(cand))]))
+            j = pool.pick(b, frame.unit[a], rng)
+            if j >= 0:
+                keep.append((a, j))
         pairs = np.asarray(keep, dtype=np.int64).reshape(-1, 2)
     rows = np.r_[pairs[:, 0], pairs[:, 1]]
     labels = np.r_[np.zeros(len(pairs), np.int8), np.ones(len(pairs), np.int8)]
@@ -167,49 +158,35 @@ def time_order_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
     return rows[first], labels[first]
 
 
-def reidentification_pairs(frame: Frame, lo: float, hi: float, n_pairs: int,
-                   max_per_unit: int, rng: np.random.Generator,
-                   train: np.ndarray, controls: str = "random"):
-    """Pairs for the re-identification test.
+def reidentification_pairs(frame: Frame, lo: float, hi: float,
+                           n_pairs: int, max_per_unit: int,
+                           rng: np.random.Generator, train: np.ndarray):
+    """Pairs for the re-identification test: two rows of one unit
+    (label 1), and the first of them with a row of a control unit
+    (label 0).
+
+    The control is a random unit matched to the first on everything the
+    table records about a unit other than who it is: observed at the
+    second row's time (when there is a time column) and in the same
+    matching group (``frame.stratum``: event status and group columns).
+    A pair whose unit has no such control is left out whole, so both
+    labels come from the same anchors.
 
     ``train`` is the unit split, drawn before any pair: anchors and
-    controls come from one side, so every matched pair reaches the
-    scorer whole. Returns (row_a, row_b, label, is_train).
-
-    controls="random": the other unit is any unit observed at the
-        matched time (any unit, without a time column).
-    controls="nearest_neighbour": the other unit is one of the 5 units
-        nearest the anchor's unit by squared Euclidean distance between
-        standardized per-unit feature means, computed within the side.
-        Differences shared by a kind of unit are matched away; so is a
-        unit's own average level.
+    controls come from one side, so every pair reaches the scorer whole.
+    Returns (row_a, row_b, label, is_train).
     """
-    if controls not in ("random", "nearest_neighbour"):
-        raise ValueError("controls is 'random' or 'nearest_neighbour'")
     n_train = int(round(n_pairs * train.mean()))
     out = []
     for side, n in ((True, n_train), (False, n_pairs - n_train)):
         units = np.flatnonzero(train == side)
         same = _within_unit(frame, units, lo, hi, n, max_per_unit, rng)
-        in_side = np.flatnonzero(train[frame.unit] == side)
-        pool = _Pool(frame, in_side)
-        prof = unit_profiles(frame, units) if controls == "nearest_neighbour" else None
+        pool = _Pool(frame, np.flatnonzero(train[frame.unit] == side))
         for a, b in same:
-            u = frame.unit[a]
-            out.append((a, b, 1, side))
-            cand = pool.at(b, rng)
-            cand = cand[frame.unit[cand] != u]
-            if not len(cand):
-                continue
-            if prof is None:
-                j = cand[rng.integers(0, len(cand))]
-            else:
-                if len(cand) > NEAREST_POOL:
-                    cand = rng.choice(cand, NEAREST_POOL, replace=False)
-                d = ((prof[frame.unit[cand]] - prof[u]) ** 2).sum(1)
-                near = cand[np.argsort(d, kind="stable")[:NEAREST_K]]
-                j = near[rng.integers(0, len(near))]
-            out.append((a, j, 0, side))
+            j = pool.pick(b, frame.unit[a], rng)
+            if j >= 0:
+                out.append((a, b, 1, side))
+                out.append((a, j, 0, side))
     arr = np.asarray(out, dtype=np.int64).reshape(-1, 4)
     return arr[:, 0], arr[:, 1], arr[:, 2].astype(np.int8), arr[:, 3] == 1
 

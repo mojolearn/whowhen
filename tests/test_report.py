@@ -75,7 +75,8 @@ def test_report_runs_everything(fast_scorer):
         assert getattr(r, part) is not None
     assert set(r.by_gap["test"]) == {"reidentification", "time_order"}
     assert len(r.by_gap) == 4 and r.by_gap["gap"].str.startswith("short").sum() == 2
-    assert set(r.pair_tests.reidentification["controls"]) == {"random", "nearest_neighbour"}
+    assert r.info["matched_on"] == ["time", "event status"]
+    assert "controls are matched on: time, event status" in repr(r)
     assert r.pair_tests.placebo is not None and "placebo test" in repr(r)
     assert "time-only baseline" in repr(r)
     assert "re-identification test" in repr(r)
@@ -175,8 +176,9 @@ def test_whole_report_is_the_same_every_time(fast_scorer):
     assert "placebo" in a["pair_tests"]
     assert a == b
     assert set(a["headline"]) == {
-        "reidentification", "reidentification_nearest_neighbour", "time_order", "placebo", "record_wise_gap",
-        "temporal_split_gap", "out_of_time_gap", "time_only", "time_only_gain"}
+        "reidentification", "time_order", "placebo", "record_wise_gap",
+        "temporal_split_gap", "out_of_time_gap", "time_only",
+        "time_only_gain"}
 
 
 def test_fail_if_conditions():
@@ -326,13 +328,12 @@ def test_pairs_without_time_respect_unit_and_split():
     f = panel.frame(["trait", "noise"])
     assert f.time is None
     train = pairs.split_units(f, 0, 4)
-    for mode in ("random", "nearest_neighbour"):
-        ra, rb, lab, tr = pairs.reidentification_pairs(
-            f, 0.0, 0.0, 800, 2, np.random.default_rng(0), train, mode)
-        assert (ra != rb).all() and (lab == 1).sum() and (lab == 0).sum()
-        assert ((f.unit[ra] == f.unit[rb]) == (lab == 1)).all()
-        assert (train[f.unit[ra]] == tr).all()
-        assert (train[f.unit[rb]] == tr).all()
+    ra, rb, lab, tr = pairs.reidentification_pairs(
+        f, 0.0, 0.0, 800, 2, np.random.default_rng(0), train)
+    assert (ra != rb).all() and (lab == 1).sum() == (lab == 0).sum() > 0
+    assert ((f.unit[ra] == f.unit[rb]) == (lab == 1)).all()
+    assert (train[f.unit[ra]] == tr).all()
+    assert (train[f.unit[rb]] == tr).all()
 
 
 def test_report_without_time(fast_scorer):
@@ -340,27 +341,58 @@ def test_report_without_time(fast_scorer):
     r = ww.report(df.drop(columns="event"), unit="unit",
                   features={"trait": ["trait"], "noise": ["noise"]},
                   repeats=2, n_pairs=3000, _scorer=fast_scorer)
-    t = r.pair_tests.reidentification
-    auc = lambda name, mode="random": float(
-        t[(t["features"] == name) & (t["controls"] == mode)]["auc"].iloc[0])
-    assert auc("trait") > 0.75
-    # against units with nearly the same trait, the trait says little
-    assert auc("trait", "nearest_neighbour") < auc("trait") - 0.15
-    assert abs(auc("noise") - 0.5) < 0.06
-    assert abs(auc("noise", "nearest_neighbour") - 0.5) < 0.06
+    auc = r.pair_tests.reidentification.set_index("features")["auc"]
+    assert auc["trait"] > 0.75
+    assert abs(auc["noise"] - 0.5) < 0.06
     assert r.pair_tests.time_order is None and r.pair_tests.placebo is None
     assert list(r.importance) == ["reidentification"]
     assert r.info["offset"] is None and r.info["time"] is None
     assert {k for k, v in r.skipped.items()
             if v.startswith("no time column")} == {
         "by_gap", "temporal_split", "out_of_time", "time_only"}
-    assert "no time column: a pair is" in repr(r)
-    assert set(r.headline()) == {"reidentification", "reidentification_nearest_neighbour"}
+    assert "matched on: nothing" in repr(r)
+    assert set(r.headline()) == {"reidentification"}
     # with an event column the overlap check runs too
     r = ww.report(df, unit="unit", event="event", features=["trait"],
                   repeats=2, n_pairs=1500, _scorer=fast_scorer)
     assert r.record_wise is not None and "record_wise_gap" in r.headline()
     assert r.temporal_split is None and r.time_only is None
+    # every unit has an event row here, and all of them are kept
+    assert r.pair_tests.info["n_units_reidentification"] == 300
+
+
+def batch_table(individual, record_batch, n=400, m=4, n_batches=8, seed=0):
+    """Rows shifted by a batch a unit was measured in, plus (optionally)
+    each unit's own level; no time order."""
+    rng = np.random.default_rng(seed)
+    u = np.repeat(np.arange(n), m)
+    b = rng.integers(0, n_batches, n)
+    X = (rng.normal(0, 2, (n_batches, 3))[b[u]]
+         + rng.normal(0, individual, (n, 3))[u]
+         + rng.normal(0, 1, (len(u), 3)))
+    df = pd.DataFrame(X, columns=["a", "b", "c"]).assign(unit=u)
+    return df.assign(batch=b[u]) if record_batch else df
+
+
+@pytest.mark.parametrize("individual, recorded, lo, hi", [
+    (0.0, False, 0.8, 1.0),    # batch read as identity when not recorded
+    (0.0, True, 0.44, 0.56),   # recorded batch: controls from the same batch
+    (0.6, True, 0.54, 0.7),    # a unit's own level still counts
+])
+def test_controls_are_matched_on_group_columns(fast_scorer, individual,
+                                               recorded, lo, hi):
+    r = ww.report(batch_table(individual, recorded), unit="unit",
+                  repeats=2, n_pairs=3000, _scorer=fast_scorer)
+    assert r.info["matched_on"] == (["batch"] if recorded else [])
+    assert lo < r.headline()["reidentification"] < hi
+
+
+def test_group_columns():
+    p = Panel(batch_table(0.0, True).assign(
+        site=lambda d: d["unit"] % 2,                   # a group
+        age=lambda d: d["unit"] * 1.5,                  # one value per unit
+        shift=lambda d: np.arange(len(d)) % 2), "unit")  # changes in a unit
+    assert p.group_columns() == ["batch", "site"]
 
 
 def test_horizon_without_time_is_an_error():

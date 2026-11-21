@@ -53,14 +53,7 @@ class Report:
         did not run has no entry."""
         h = {}
         if self.pair_tests is not None:
-            t = self.pair_tests.reidentification
-            if t is not None:
-                for mode, name in (("random", "reidentification"),
-                                   ("nearest_neighbour", "reidentification_nearest_neighbour")):
-                    sub = t[t["controls"] == mode]
-                    if len(sub):
-                        h[name] = float(sub["auc"].max())
-            for kind in ("time_order", "placebo"):
+            for kind in ("reidentification", "time_order", "placebo"):
                 t = getattr(self.pair_tests, kind)
                 if t is not None:
                     h[kind] = float(t["auc"].max())
@@ -74,7 +67,8 @@ class Report:
             h["time_only"] = max(
                 float(x.table.set_index("input")["auc"]["time"])
                 for x in self.time_only.values())
-            h["time_only_gain"] = min(float(x.gain) for x in self.time_only.values())
+            h["time_only_gain"] = min(float(x.gain)
+                                      for x in self.time_only.values())
         return h
 
     def to_dict(self) -> dict:
@@ -101,9 +95,10 @@ class Report:
         if i["offset"]:
             out.append(f"rows of a pair are {i['offset'][0]} to "
                        f"{i['offset'][1]} apart (chosen from the data)")
-        if i.get("time", "") is None:
-            out.append("no time column: a pair is two rows of one unit, or "
-                       "one row each from two units")
+        if "matched_on" in i:
+            out.append("re-identification controls are matched on: "
+                       + (", ".join(i["matched_on"]) or
+                          "nothing (no time, event or group column)"))
         w = i.get("whowhen")
         if w:
             out.append(f"whowhen {w['version']} (doi:{w['doi']})")
@@ -224,7 +219,7 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
     rep = Report(scorer=sc.describe(), info={
         "whowhen": {"version": __version__, "doi": __doi__},
         "n_units": int(panel.df[unit].nunique()), "features": flat,
-        "time": time,
+        "time": time, "matched_on": panel.matched_on(),
         "offset": None, "horizon": None if horizon is None else str(horizon),
         "repeats": repeats, "random": random, "seed": seed})
     common = dict(seed=seed, random=random, repeats=repeats)
@@ -247,8 +242,7 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
             r = audit(panel, features, (a, b), scorer=sc, n_pairs=n_pairs,
                       **common)
             for kind in ("reidentification", "time_order"):
-                t = getattr(r, kind).drop(columns="controls",
-                                          errors="ignore")
+                t = getattr(r, kind).copy()
                 t.insert(0, "test", kind)
                 t.insert(1, "gap", f"{name}: {a} to {b}")
                 out.append(t)
@@ -268,7 +262,7 @@ def report(df: pd.DataFrame, unit: str, time: str | None = None,
                                n_pairs=n_pairs,
                                which=(("reidentification", "time_order", "placebo")
                                       if time else ("reidentification",)),
-                               controls=("random", "nearest_neighbour"), **common),
+                               **common),
         "importance": lambda: rank_columns(panel, flat, offset, scorer=sc,
                                         n_pairs=n_pairs, **common),
         "record_wise": lambda: per_set(overlap_check),

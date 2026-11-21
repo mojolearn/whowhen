@@ -13,9 +13,8 @@ To use a report in a script, name what counts as a failure:
 
 The command then exits with 1 if any condition holds, and with 2 if a
 condition names a check that did not run. The names are
-reidentification, reidentification_nearest_neighbour, time_order,
-placebo, record_wise_gap, temporal_split_gap, out_of_time_gap,
-time_only and time_only_gain.
+reidentification, time_order, placebo, record_wise_gap,
+temporal_split_gap, out_of_time_gap, time_only and time_only_gain.
 """
 from __future__ import annotations
 
@@ -30,9 +29,9 @@ import pandas as pd
 from .report import report
 
 
-NAMES = ("reidentification", "reidentification_nearest_neighbour",
-         "time_order", "placebo", "record_wise_gap", "temporal_split_gap",
-         "out_of_time_gap", "time_only", "time_only_gain")
+NAMES = ("reidentification", "time_order", "placebo", "record_wise_gap",
+         "temporal_split_gap", "out_of_time_gap", "time_only",
+         "time_only_gain")
 OPS = {">": operator.gt, "<": operator.lt, ">=": operator.ge,
        "<=": operator.le}
 

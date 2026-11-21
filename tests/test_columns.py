@@ -39,12 +39,12 @@ def test_planted_columns_rank_first(panel, fast_scorer):
 def test_draw_is_shared_and_matches_audit_seed(panel):
     f = panel.frame(COLS)
     lo, hi = panel.offset("30D"), panel.offset("70D")
-    a = draw(f, "reidentification", "random", 1, 0, lo, hi, 500, 2)
-    b = draw(f, "reidentification", "random", 1, 0, lo, hi, 500, 2)
+    a = draw(f, "reidentification", 1, 0, lo, hi, 500, 2)
+    b = draw(f, "reidentification", 1, 0, lo, hi, 500, 2)
     assert (a.rows_a == b.rows_a).all() and (a.rows_b == b.rows_b).all()
     assert (a.tr == b.tr).all()
     assert a.features(f, [0, 1]).shape == (len(a.y), 6)
-    t = draw(f, "time_order", "random", 0, 0, lo, hi, 500, 2)
+    t = draw(f, "time_order", 0, 0, lo, hi, 500, 2)
     assert t.rows_b is None and t.features(f, [0]).shape == (len(t.y), 1)
 
 

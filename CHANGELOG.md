@@ -2,6 +2,9 @@
 
 ## 0.3.0 (unreleased)
 
+- Re-identification controls are matched on everything the table records about a unit other than who it is: the same time (as before), the same event status, and the same value in every group column (a column with one value per unit and on average at least 10 units per value, such as site, batch or scanner, found automatically). A site, batch or calendar effect shared by a unit's rows no longer passes for identity, and the report lists what controls were matched on. This replaces nearest-neighbour controls, which matched on column averages and so also removed each unit's own level; `reidentification_nearest_neighbour` is gone.
+- Units with an event are kept in the re-identification test, matched to controls that also had the event. They were left out before, which with a per-unit label dropped most units. The time-order test and its placebo still leave them out.
+- A same-unit pair whose unit has no matching control is now left out with it; it was kept before, which tilted the classes toward same-unit pairs when controls were scarce.
 - `repeats` defaults to 3 instead of 4: each run holds out a quarter of the units instead of a fifth, and every report does a quarter fewer model fits.
 - The checks now use standard names. Scripts that read the JSON, call `headline()` or use `--fail-if` need the new names:
 
@@ -9,8 +12,8 @@
 |---|---|
 | identity audit, `identity` | re-identification test, `reidentification` |
 | timing audit, `timing` | time-order test, `time_order` |
-| `impostors`: `random`, `nearest` | `controls`: `random`, `nearest_neighbour` |
-| `identity_nearest` | `reidentification_nearest_neighbour` |
+| `impostors` column (`random`, `nearest`) | removed: one row per feature set, against matched controls |
+| `identity_nearest` | removed |
 | timing placebo | placebo test, `placebo` |
 | report part `audit` | `pair_tests` |
 | `gaps` | `by_gap` (its `audit` column is now `test`) |

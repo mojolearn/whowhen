@@ -8,8 +8,8 @@ from joblib import Parallel, delayed
 
 from ._stats import auc
 from .audit import (Draw, cores as n_cores, draw, n_workers, pair_gap,
-                    pick_seed)
-from .panel import Frame, Panel
+                    pick_seed, test_frames)
+from .panel import Frame, Panel  # noqa: F401
 from .scorers import Scorer, resolve
 
 
@@ -60,18 +60,14 @@ def rank_columns(panel: Panel, columns, offset=None, *, scorer=None,
         raise ValueError("rank_columns needs at least one column")
     which, lo, hi = pair_gap(panel, offset, which)
     sc = resolve(scorer)
-    frame = panel.frame(columns)
-    frame.repeats, frame.random = repeats, random
-    if frame.n_units < 10:
-        raise ValueError(f"only {frame.n_units} units without an event; "
-                         f"the pair tests need many units")
+    frames = test_frames(panel, columns, which, repeats, random)
     cores = n_cores()
 
     # Phase 1: one draw per (test, seed), in parallel.
     keys = [(kind, k) for kind in which for k in range(repeats)]
     workers = n_workers(n_jobs, len(keys))
     draws = dict(zip(keys, Parallel(n_jobs=workers)(
-        delayed(draw)(frame, kind, "random", k, seed, lo, hi, n_pairs,
+        delayed(draw)(frames[kind], kind, k, seed, lo, hi, n_pairs,
                       max_pairs_per_unit) for kind, k in keys)))
 
     # Phase 2: every (test, seed, column set) fit, in parallel. Column
@@ -87,7 +83,8 @@ def rank_columns(panel: Panel, columns, offset=None, *, scorer=None,
     workers = n_workers(n_jobs, len(tasks))
     threads = max(1, cores // workers)
     aucs = dict(zip(tasks, Parallel(n_jobs=workers)(
-        delayed(_fit_auc)(frame, draws[key], cols, sc, seed, threads)
+        delayed(_fit_auc)(frames[key[0]], draws[key], cols, sc, seed,
+                          threads)
         for key, cols in tasks)))
 
     out = {}
