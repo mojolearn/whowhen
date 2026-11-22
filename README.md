@@ -18,6 +18,35 @@ scoring well by recognizing units or by reading elapsed time.
 pip install whowhen
 ```
 
+## Quickstart
+
+Run this five-line example after installing. It creates a synthetic DataFrame
+with 200 units observed at eight times (1,600 rows); no dataset download is needed.
+
+```python
+import pandas as pd
+import whowhen as ww
+unit_col, time_col = "unit", "time"
+df = pd.DataFrame([(u, t, u / 200, t / 8) for u in range(200) for t in range(8)], columns=[unit_col, time_col, "unit_level", "clock"])
+print(ww.report(df, unit=unit_col, time=time_col, repeats=1, n_pairs=1000))
+```
+
+Example output, summarized from a local run (scores can vary with the classifier
+and its version):
+
+| Check | AUC |
+|---|---|
+| Re-identification | 1.000 |
+| Time order | 0.689 |
+| Placebo | 0.697 |
+
+The report shows re-identification, time-order and placebo AUCs, plus results
+by time gap. Here `unit_level` deliberately identifies units and `clock`
+tracks time across all units, so both signals should be easy to detect.
+Event checks are skipped because this example has no event column.
+Use your own `df`, `unit_col` and `time_col` to check your data; the smaller
+pair budget and single repeat keep this example quick.
+
 ## Use
 
 From the terminal, give a CSV file and the names of its columns:
